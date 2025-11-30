@@ -120,8 +120,7 @@ if uploaded_file:
                 event_details_list.append(details)
                 event_count += 1
 
-    event_details_combined = "
-".join(event_details_list)
+    event_details_combined = "\n".join(event_details_list)
 
     # Narrative
     narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
