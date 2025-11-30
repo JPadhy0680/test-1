@@ -37,7 +37,7 @@ def map_outcome(code):
     }
     return mapping.get(code, "Unknown")
 
-st.title("Enhanced E2B XML Parser - Multiple Files")
+st.title("E2B XML Parser - JM")
 
 uploaded_files = st.file_uploader("Upload one or more E2B XML files", type=["xml"], accept_multiple_files=True)
 
