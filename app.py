@@ -117,25 +117,49 @@ if uploaded_file:
     start_dates_combined = ', '.join(suspect_starts)
     stop_dates_combined = ', '.join(suspect_stops)
 
-    # Event Details with seriousness
     event_details_list = []
-    event_count = 1
-    for reaction in root.findall('.//hl7:observation', ns):
-        code_elem = reaction.find('hl7:code', ns)
-        if code_elem is not None and code_elem.attrib.get('displayName') == 'reactionForTranslation':
-            value_elem = reaction.find('hl7:value', ns)
-            event_name = value_elem.text if value_elem is not None else ''
 
-            # Seriousness criteria from outboundRelationship2 -> observation
-            seriousness = []
-            for rel in reaction.findall('../hl7:outboundRelationship2', ns):
-                obs_elem = rel.find('hl7:observation', ns)
-                if obs_elem is not None:
-                    scode_elem = obs_elem.find('hl7:code', ns)
-                    sval_elem = obs_elem.find('hl7:value', ns)
-                    if scode_elem is not None and sval_elem is not None:
-                        if scode_elem.attrib.get('displayName') in SERIOUSNESS_TERMS and sval_elem.attrib.get('value') == 'true':
-                            seriousness.append(scode_elem.attrib.get('displayName'))
+for reaction in root.findall('.//hl7:observation', ns):
+    code_elem = reaction.find('hl7:code', ns)
+    if code_elem is None:
+        continue
+
+    # Only process reactions
+    if code_elem.attrib.get('displayName') != 'reactionForTranslation':
+        continue
+
+    # Get event name
+    value_elem = reaction.find('hl7:value', ns)
+    event_name = value_elem.text if value_elem is not None else ''
+
+    # Build seriousness dict instead of list
+    seriousness = {}
+
+    # Loop through outboundRelationship2 siblings
+    parent = reaction.getparent()
+    if parent is not None:
+        for rel in parent.findall('hl7:outboundRelationship2', ns):
+            obs_elem = rel.find('hl7:observation', ns)
+            if obs_elem is None:
+                continue
+
+            scode_elem = obs_elem.find('hl7:code', ns)
+            sval_elem = obs_elem.find('hl7:value', ns)
+
+            if scode_elem is None or sval_elem is None:
+                continue
+
+            seriousness_name = scode_elem.attrib.get('displayName')
+            seriousness_value = sval_elem.attrib.get('value')  # "true" or "false"
+
+            if seriousness_name in SERIOUSNESS_TERMS:
+                seriousness[seriousness_name] = seriousness_value
+
+    event_details_list.append({
+        "event_name": event_name,
+        "seriousness": seriousness
+    })
+
 
             # Outcome
             outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
