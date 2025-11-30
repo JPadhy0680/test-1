@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import xml.etree.ElementTree as ET
@@ -13,17 +14,40 @@ def format_date(date_str):
         return ""
 
 def map_reporter(code):
-    mapping = {"1": "Physician", "2": "Pharmacist", "3": "Other health professional", "4": "Lawyer", "5": "Consumer or other non-health professional"}
+    mapping = {
+        "1": "Physician",
+        "2": "Pharmacist",
+        "3": "Other health professional",
+        "4": "Lawyer",
+        "5": "Consumer or other non-health professional"
+    }
     return mapping.get(code, "Unknown")
 
 def map_gender(code):
     return {"1": "Male", "2": "Female"}.get(code, "Unknown")
 
 def map_outcome(code):
-    mapping = {"1": "Recovered/Resolved", "2": "Recovering/Resolving", "3": "Not recovered/Ongoing", "4": "Recovered with sequelae", "5": "Fatal", "0": "Unknown"}
+    mapping = {
+        "1": "Recovered/Resolved",
+        "2": "Recovering/Resolving",
+        "3": "Not recovered/Ongoing",
+        "4": "Recovered with sequelae",
+        "5": "Fatal",
+        "0": "Unknown"
+    }
     return mapping.get(code, "Unknown")
 
-st.title("Enhanced E2B XML Parser - Seriousness Logic Fixed")
+# Seriousness criteria list
+SERIOUSNESS_TERMS = [
+    "resultsInDeath",
+    "isLifeThreatening",
+    "requiresInpatientHospitalization",
+    "resultsInPersistentOrSignificantDisability",
+    "congenitalAnomalyBirthDefect",
+    "otherMedicallyImportantCondition"
+]
+
+st.title("Enhanced E2B XML Parser - Correct Seriousness Logic")
 
 uploaded_file = st.file_uploader("Upload E2B XML file", type=["xml"])
 
@@ -93,7 +117,7 @@ if uploaded_file:
     start_dates_combined = ', '.join(suspect_starts)
     stop_dates_combined = ', '.join(suspect_stops)
 
-    # Event Details with seriousness from outboundRelationship2
+    # Event Details with seriousness
     event_details_list = []
     event_count = 1
     for reaction in root.findall('.//hl7:observation', ns):
@@ -102,14 +126,16 @@ if uploaded_file:
             value_elem = reaction.find('hl7:value', ns)
             event_name = value_elem.text if value_elem is not None else ''
 
-            # Traverse outboundRelationship2 for seriousness
+            # Seriousness criteria from outboundRelationship2 -> observation
             seriousness = []
             for rel in reaction.findall('../hl7:outboundRelationship2', ns):
-                scode_elem = rel.find('.//hl7:code', ns)
-                sval_elem = rel.find('.//hl7:value', ns)
-                if scode_elem is not None and sval_elem is not None:
-                    if sval_elem.attrib.get('value') == 'true':
-                        seriousness.append(scode_elem.attrib.get('displayName', ''))
+                obs_elem = rel.find('hl7:observation', ns)
+                if obs_elem is not None:
+                    scode_elem = obs_elem.find('hl7:code', ns)
+                    sval_elem = obs_elem.find('hl7:value', ns)
+                    if scode_elem is not None and sval_elem is not None:
+                        if scode_elem.attrib.get('displayName') in SERIOUSNESS_TERMS and sval_elem.attrib.get('value') == 'true':
+                            seriousness.append(scode_elem.attrib.get('displayName'))
 
             # Outcome
             outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
