@@ -37,169 +37,127 @@ def map_outcome(code):
     }
     return mapping.get(code, "Unknown")
 
-# Seriousness criteria list
-SERIOUSNESS_TERMS = [
-    "resultsInDeath",
-    "isLifeThreatening",
-    "requiresInpatientHospitalization",
-    "resultsInPersistentOrSignificantDisability",
-    "congenitalAnomalyBirthDefect",
-    "otherMedicallyImportantCondition"
-]
+st.title("Enhanced E2B XML Parser - Multiple Files")
 
-st.title("Enhanced E2B XML Parser - Correct Seriousness Logic")
+uploaded_files = st.file_uploader("Upload one or more E2B XML files", type=["xml"], accept_multiple_files=True)
 
-uploaded_file = st.file_uploader("Upload E2B XML file", type=["xml"])
+if uploaded_files:
+    all_data = []
 
-if uploaded_file:
-    tree = ET.parse(uploaded_file)
-    root = tree.getroot()
-    ns = {'hl7': 'urn:hl7-org:v3'}
+    for uploaded_file in uploaded_files:
+        tree = ET.parse(uploaded_file)
+        root = tree.getroot()
+        ns = {'hl7': 'urn:hl7-org:v3'}
 
-    current_date = datetime.now().strftime("%d-%b-%Y")
+        current_date = datetime.now().strftime("%d-%b-%Y")
 
-    # Sender ID
-    sender_elem = root.find('.//hl7:id[@root="2.16.840.1.113883.3.989.2.1.3.1"]', ns)
-    sender_id = sender_elem.attrib.get('extension', '') if sender_elem is not None else ''
+        # Sender ID
+        sender_elem = root.find('.//hl7:id[@root="2.16.840.1.113883.3.989.2.1.3.1"]', ns)
+        sender_id = sender_elem.attrib.get('extension', '') if sender_elem is not None else ''
 
-    # Transmission Date
-    creation_elem = root.find('.//hl7:creationTime', ns)
-    transmission_date = format_date(creation_elem.attrib.get('value', '') if creation_elem is not None else '')
+        # Transmission Date
+        creation_elem = root.find('.//hl7:creationTime', ns)
+        transmission_date = format_date(creation_elem.attrib.get('value', '') if creation_elem is not None else '')
 
-    # Reporter Qualification
-    reporter_elem = root.find('.//hl7:asQualifiedEntity/hl7:code', ns)
-    reporter_qualification = map_reporter(reporter_elem.attrib.get('code', '') if reporter_elem is not None else '')
+        # Reporter Qualification
+        reporter_elem = root.find('.//hl7:asQualifiedEntity/hl7:code', ns)
+        reporter_qualification = map_reporter(reporter_elem.attrib.get('code', '') if reporter_elem is not None else '')
 
-    # Gender
-    gender_elem = root.find('.//hl7:administrativeGenderCode', ns)
-    gender = map_gender(gender_elem.attrib.get('code', '') if gender_elem is not None else '')
+        # Gender
+        gender_elem = root.find('.//hl7:administrativeGenderCode', ns)
+        gender = map_gender(gender_elem.attrib.get('code', '') if gender_elem is not None else '')
 
-    # Age
-    age_elem = root.find('.//hl7:code[@displayName="age"]/../hl7:value', ns)
-    age = f"{age_elem.attrib.get('value', '')} {age_elem.attrib.get('unit', '')}" if age_elem is not None else ''
+        # Age
+        age_elem = root.find('.//hl7:code[@displayName="age"]/../hl7:value', ns)
+        age = f"{age_elem.attrib.get('value', '')} {age_elem.attrib.get('unit', '')}" if age_elem is not None else ''
 
-    # Weight
-    weight_elem = root.find('.//hl7:code[@displayName="bodyWeight"]/../hl7:value', ns)
-    weight = f"{weight_elem.attrib.get('value', '')} {weight_elem.attrib.get('unit', '')}" if weight_elem is not None else ''
+        # Weight
+        weight_elem = root.find('.//hl7:code[@displayName="bodyWeight"]/../hl7:value', ns)
+        weight = f"{weight_elem.attrib.get('value', '')} {weight_elem.attrib.get('unit', '')}" if weight_elem is not None else ''
 
-    # Height
-    height_elem = root.find('.//hl7:code[@displayName="height"]/../hl7:value', ns)
-    height = f"{height_elem.attrib.get('value', '')} {height_elem.attrib.get('unit', '')}" if height_elem is not None else ''
+        # Height
+        height_elem = root.find('.//hl7:code[@displayName="height"]/../hl7:value', ns)
+        height = f"{height_elem.attrib.get('value', '')} {height_elem.attrib.get('unit', '')}" if height_elem is not None else ''
 
-    # Suspect drugs combined logic
-    drugs_info = {}
-    for drug in root.findall('.//hl7:substanceAdministration', ns):
-        id_elem = drug.find('.//hl7:id', ns)
-        drug_id = id_elem.attrib.get('root', '') if id_elem is not None else ''
-        name_elem = drug.find('.//hl7:kindOfProduct/hl7:name', ns)
-        drug_name = name_elem.text if name_elem is not None else ''
-        start_elem = drug.find('.//hl7:low', ns)
-        start_date = format_date(start_elem.attrib.get('value', '') if start_elem is not None else '')
-        stop_elem = drug.find('.//hl7:high', ns)
-        stop_date = format_date(stop_elem.attrib.get('value', '') if stop_elem is not None else '')
-        drugs_info[drug_id] = {'name': drug_name, 'start': start_date, 'stop': stop_date}
+        # Suspect drugs combined logic
+        drugs_info = {}
+        for drug in root.findall('.//hl7:substanceAdministration', ns):
+            id_elem = drug.find('.//hl7:id', ns)
+            drug_id = id_elem.attrib.get('root', '') if id_elem is not None else ''
+            name_elem = drug.find('.//hl7:kindOfProduct/hl7:name', ns)
+            drug_name = name_elem.text if name_elem is not None else ''
+            start_elem = drug.find('.//hl7:low', ns)
+            start_date = format_date(start_elem.attrib.get('value', '') if start_elem is not None else '')
+            stop_elem = drug.find('.//hl7:high', ns)
+            stop_date = format_date(stop_elem.attrib.get('value', '') if stop_elem is not None else '')
+            drugs_info[drug_id] = {'name': drug_name, 'start': start_date, 'stop': stop_date}
 
-    suspect_drugs = []
-    suspect_starts = []
-    suspect_stops = []
-    for causality in root.findall('.//hl7:causalityAssessment', ns):
-        val_elem = causality.find('.//hl7:value', ns)
-        if val_elem is not None and val_elem.attrib.get('code') == '1':
-            subj_id_elem = causality.find('.//hl7:subject2/hl7:productUseReference/hl7:id', ns)
-            if subj_id_elem is not None:
-                ref_id = subj_id_elem.attrib.get('root', '')
-                if ref_id in drugs_info:
-                    suspect_drugs.append(drugs_info[ref_id]['name'])
-                    suspect_starts.append(drugs_info[ref_id]['start'])
-                    suspect_stops.append(drugs_info[ref_id]['stop'])
+        suspect_drugs = []
+        suspect_starts = []
+        suspect_stops = []
+        for causality in root.findall('.//hl7:causalityAssessment', ns):
+            val_elem = causality.find('.//hl7:value', ns)
+            if val_elem is not None and val_elem.attrib.get('code') == '1':
+                subj_id_elem = causality.find('.//hl7:subject2/hl7:productUseReference/hl7:id', ns)
+                if subj_id_elem is not None:
+                    ref_id = subj_id_elem.attrib.get('root', '')
+                    if ref_id in drugs_info:
+                        suspect_drugs.append(drugs_info[ref_id]['name'])
+                        suspect_starts.append(drugs_info[ref_id]['start'])
+                        suspect_stops.append(drugs_info[ref_id]['stop'])
 
-    drug_names_combined = ', '.join(suspect_drugs)
-    start_dates_combined = ', '.join(suspect_starts)
-    stop_dates_combined = ', '.join(suspect_stops)
+        drug_names_combined = ', '.join(suspect_drugs)
+        start_dates_combined = ', '.join(suspect_starts)
+        stop_dates_combined = ', '.join(suspect_stops)
 
-    event_details_list = []
+        # Event Details (only name and outcome now)
+        event_details_list = []
+        event_count = 1
+        for reaction in root.findall('.//hl7:observation', ns):
+            code_elem = reaction.find('hl7:code', ns)
+            if code_elem is not None and code_elem.attrib.get('displayName') == 'reactionForTranslation':
+                value_elem = reaction.find('hl7:value', ns)
+                event_name = value_elem.text if value_elem is not None else ''
 
-for reaction in root.findall('.//hl7:observation', ns):
-    code_elem = reaction.find('hl7:code', ns)
-    if code_elem is None:
-        continue
+                outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
+                outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
 
-    # Only process reactions
-    if code_elem.attrib.get('displayName') != 'reactionForTranslation':
-        continue
+                if event_name:
+                    details = f"Event {event_count}: {event_name} (Outcome: {outcome})"
+                    event_details_list.append(details)
+                    event_count += 1
 
-    # Get event name
-    value_elem = reaction.find('hl7:value', ns)
-    event_name = value_elem.text if value_elem is not None else ''
+        event_details_combined = "\n".join(event_details_list)
 
-    # Build seriousness dict instead of list
-    seriousness = {}
+        # Narrative
+        narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
+        narrative = narrative_elem.text if narrative_elem is not None else ''
 
-    # Loop through outboundRelationship2 siblings
-    parent = reaction.getparent()
-    if parent is not None:
-        for rel in parent.findall('hl7:outboundRelationship2', ns):
-            obs_elem = rel.find('hl7:observation', ns)
-            if obs_elem is None:
-                continue
+        all_data.append({
+            'Current Date': current_date,
+            'Sender ID': sender_id,
+            'Transmission Date': transmission_date,
+            'Reporter Qualification': reporter_qualification,
+            'Gender': gender,
+            'Age': age,
+            'Weight': weight,
+            'Height': height,
+            'Drug Names': drug_names_combined,
+            'Start Dates': start_dates_combined,
+            'Stop Dates': stop_dates_combined,
+            'Event Details': event_details_combined,
+            'Listedness': '',
+            'Narrative': narrative
+        })
 
-            scode_elem = obs_elem.find('hl7:code', ns)
-            sval_elem = obs_elem.find('hl7:value', ns)
-
-            if scode_elem is None or sval_elem is None:
-                continue
-
-            seriousness_name = scode_elem.attrib.get('displayName')
-            seriousness_value = sval_elem.attrib.get('value')  # "true" or "false"
-
-            if seriousness_name in SERIOUSNESS_TERMS:
-                seriousness[seriousness_name] = seriousness_value
-
-    event_details_list.append({
-        "event_name": event_name,
-        "seriousness": seriousness
-    })
-
-
-            # Outcome
-            outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
-            outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
-
-            if event_name:
-                details = f"Event {event_count}: {event_name} (Seriousness: {', '.join(seriousness)}; Outcome: {outcome})"
-                event_details_list.append(details)
-                event_count += 1
-
-    event_details_combined = "\n".join(event_details_list)
-
-    # Narrative
-    narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
-    narrative = narrative_elem.text if narrative_elem is not None else ''
-
-    data = [{
-        'Current Date': current_date,
-        'Sender ID': sender_id,
-        'Transmission Date': transmission_date,
-        'Reporter Qualification': reporter_qualification,
-        'Gender': gender,
-        'Age': age,
-        'Weight': weight,
-        'Height': height,
-        'Drug Names': drug_names_combined,
-        'Start Dates': start_dates_combined,
-        'Stop Dates': stop_dates_combined,
-        'Event Details': event_details_combined,
-        'Listedness': '',
-        'Narrative': narrative
-    }]
-
-    df = pd.DataFrame(data)
+    # Combine all data into one DataFrame
+    df = pd.DataFrame(all_data)
     st.dataframe(df)
 
+    # Download options
     csv = df.to_csv(index=False)
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
         df.to_excel(writer, index=False)
 
     st.download_button("Download CSV", csv, "parsed_data.csv")
-    st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
