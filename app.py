@@ -4,6 +4,8 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import datetime
 import io
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 # Configure page layout
 st.set_page_config(layout="wide")
@@ -29,7 +31,7 @@ body {
     width: 100%;
 }
 table {
-    white-space: pre-wrap; /* Allow multi-line cells */
+    white-space: pre-wrap; /* Multi-line cells */
     width: 100%;
 }
 .footer {
@@ -53,7 +55,7 @@ with st.expander("📖 Instructions"):
     - Upload **multiple E2B XML files** and **LLT-PT mapping Excel file**.
     - Combined data will be displayed in the Export & Edit tab.
     - You can edit Listedness, Validity, and App Assessment directly in the table.
-    - Download options for CSV and Excel are available below.
+    - Download options for CSV, Excel, and PDF are available side by side.
     """)
 
 # Tabs for navigation
@@ -142,7 +144,7 @@ with tab1:
             reporter_qualification = map_reporter(reporter_elem.attrib.get('code', '') if reporter_elem is not None else '')
 
             gender_elem = root.find('.//hl7:administrativeGenderCode', ns)
-            gender = map_gender(gender_elem.attrib.get('code', '') if gender_elem is not None else '')
+            gender = map_gender(gender_elem.attrib.get('code', '') if gender_elem is not None else ''
 
             age_elem = root.find('.//hl7:code[@displayName="age"]/../hl7:value', ns)
             age = f"{age_elem.attrib.get('value', '')} {age_elem.attrib.get('unit', '')}" if age_elem is not None else ''
@@ -260,8 +262,26 @@ with tab2:
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
             edited_df.to_excel(writer, index=False)
 
-        st.download_button("⬇️ Download CSV", csv, "parsed_data.csv")
-        st.download_button("⬇️ Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+        # Generate PDF
+        pdf_buffer = io.BytesIO()
+        c = canvas.Canvas(pdf_buffer, pagesize=letter)
+        textobject = c.beginText(40, 750)
+        textobject.setFont("Helvetica", 8)
+        for row in edited_df.to_string(index=False).split("\n"):
+            textobject.textLine(row)
+        c.drawText(textobject)
+        c.showPage()
+        c.save()
+        pdf_buffer.seek(0)
+
+        # Download buttons side by side
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.download_button("⬇️ Download CSV", csv, "parsed_data.csv")
+        with col2:
+            st.download_button("⬇️ Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+        with col3:
+            st.download_button("⬇️ Download PDF", pdf_buffer.getvalue(), "parsed_data.pdf")
     else:
         st.info("No data available yet. Please upload files in the first tab.")
 
@@ -272,6 +292,7 @@ st.markdown("""
     <i>Disclaimer: App is in developmental stage, validate before using the data.</i>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
