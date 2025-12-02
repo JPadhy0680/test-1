@@ -4,18 +4,14 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import datetime
 import io
-import logging
 
-logging.basicConfig(level=logging.INFO)
-
-# ---------------- Helper Functions ---------------- #
+# Helper Functions
 def format_date(date_str):
     if not date_str or len(date_str) < 8:
         return ""
     try:
         return datetime.strptime(date_str[:8], "%Y%m%d").strftime("%d-%b-%Y")
-    except ValueError as e:
-        logging.warning(f"Date parsing failed: {e}")
+    except ValueError:
         return ""
 
 def map_reporter(code):
@@ -42,8 +38,8 @@ def map_outcome(code):
     }
     return mapping.get(code, "Unknown")
 
-# ---------------- Streamlit UI ---------------- #
-st.title("👉 E2B XML Parser with Suspect Product Details ✅")
+# UI
+st.title("👉 E2B XML Parser with Dynamic Details ✅")
 
 uploaded_file = st.file_uploader("Upload E2B XML file", type=["xml"])
 mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"])
@@ -54,7 +50,7 @@ if uploaded_file:
     ns = {'hl7': 'urn:hl7-org:v3'}
     current_date = datetime.now().strftime("%d-%b-%Y")
 
-    # Extract XML details
+    # Extract basic info
     sender_elem = root.find('.//hl7:id[@root="2.16.840.1.113883.3.989.2.1.3.1"]', ns)
     sender_id = sender_elem.attrib.get('extension', '') if sender_elem is not None else ''
 
@@ -76,8 +72,13 @@ if uploaded_file:
     height_elem = root.find('.//hl7:code[@displayName="height"]/../hl7:value', ns)
     height = f"{height_elem.attrib.get('value', '')} {height_elem.attrib.get('unit', '')}" if height_elem is not None else ''
 
-    # Combine patient details
-    patient_detail = f"Gender: {gender}, Age: {age}, Height: {height}, Weight: {weight}"
+    # Dynamic Patient Detail
+    patient_parts = []
+    if gender: patient_parts.append(f"Gender: {gender}")
+    if age: patient_parts.append(f"Age: {age}")
+    if height: patient_parts.append(f"Height: {height}")
+    if weight: patient_parts.append(f"Weight: {weight}")
+    patient_detail = ", ".join(patient_parts)
 
     # Identify suspect drug IDs
     suspect_ids = []
@@ -88,54 +89,53 @@ if uploaded_file:
             if subj_id_elem is not None:
                 suspect_ids.append(subj_id_elem.attrib.get('root', ''))
 
-    # Build Product Detail only for suspect drugs
+    # Dynamic Product Detail for suspect drugs
     product_details_list = []
     for drug in root.findall('.//hl7:substanceAdministration', ns):
         id_elem = drug.find('.//hl7:id', ns)
         drug_id = id_elem.attrib.get('root', '') if id_elem is not None else ''
-        if drug_id in suspect_ids:  # Only suspect drugs
+        if drug_id in suspect_ids:
+            parts = []
             name_elem = drug.find('.//hl7:kindOfProduct/hl7:name', ns)
-            drug_name = name_elem.text if name_elem is not None else ''
-
+            if name_elem is not None and name_elem.text:
+                parts.append(f"Drug: {name_elem.text}")
             text_elem = drug.find('.//hl7:text', ns)
-            dosage_text = text_elem.text if text_elem is not None else ''
-
+            if text_elem is not None and text_elem.text:
+                parts.append(f"Dosage: {text_elem.text}")
             dose_elem = drug.find('.//hl7:doseQuantity', ns)
-            dose = f"{dose_elem.attrib.get('value', '')} {dose_elem.attrib.get('unit', '')}" if dose_elem is not None else ''
-
+            if dose_elem is not None:
+                dose_val = dose_elem.attrib.get('value', '')
+                dose_unit = dose_elem.attrib.get('unit', '')
+                if dose_val or dose_unit:
+                    parts.append(f"Dose: {dose_val} {dose_unit}")
             form_elem = drug.find('.//hl7:formCode/hl7:originalText', ns)
-            formulation = form_elem.text if form_elem is not None else ''
-
+            if form_elem is not None and form_elem.text:
+                parts.append(f"Formulation: {form_elem.text}")
             lot_elem = drug.find('.//hl7:lotNumberText', ns)
-            lot_no = lot_elem.text if lot_elem is not None else ''
-
+            if lot_elem is not None and lot_elem.text:
+                parts.append(f"Lot No: {lot_elem.text}")
             start_elem = drug.find('.//hl7:low', ns)
             start_date = format_date(start_elem.attrib.get('value', '') if start_elem is not None else '')
-
+            if start_date:
+                parts.append(f"Start Date: {start_date}")
             stop_elem = drug.find('.//hl7:high', ns)
             stop_date = format_date(stop_elem.attrib.get('value', '') if stop_elem is not None else '')
+            if stop_date:
+                parts.append(f"Stop Date: {stop_date}")
 
-            product_detail = (
-                f"Drug: {drug_name}, Dosage: {dosage_text}, Dose: {dose}, "
-                f"Formulation: {formulation}, Lot No: {lot_no}, "
-                f"Start Date: {start_date}, Stop Date: {stop_date}"
-            )
-            product_details_list.append(product_detail)
+            if parts:
+                product_details_list.append(", ".join(parts))
 
     product_details_combined = "\n".join(product_details_list)
 
     # Event Details
     seriousness_criteria = [
-        "resultsInDeath",
-        "isLifeThreatening",
-        "requiresInpatientHospitalization",
-        "resultsInPersistentOrSignificantDisability",
-        "congenitalAnomalyBirthDefect",
+        "resultsInDeath", "isLifeThreatening", "requiresInpatientHospitalization",
+        "resultsInPersistentOrSignificantDisability", "congenitalAnomalyBirthDefect",
         "otherMedicallyImportantCondition"
     ]
     event_details_list = []
     event_count = 1
-
     mapping_df = pd.read_excel(mapping_file) if mapping_file else None
 
     for reaction in root.findall('.//hl7:observation', ns):
@@ -169,7 +169,7 @@ if uploaded_file:
     narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
     narrative = narrative_elem.text if narrative_elem is not None else ''
 
-    # Prepare DataFrame with new format
+    # Prepare DataFrame
     data = [{
         'SL No': 1,
         'Date': current_date,
@@ -196,6 +196,7 @@ if uploaded_file:
         df.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
 
 
