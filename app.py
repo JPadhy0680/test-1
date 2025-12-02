@@ -195,7 +195,10 @@ if uploaded_files:
             'Patient Detail': patient_detail,
             'Product Detail': product_details_combined,
             'Event Details': event_details_combined_display,
-            'Narrative': narrative_display
+            'Narrative': narrative_display,
+            'Listedness': '',
+            'Validity': '',
+            'App Assessment': ''
         })
 
         all_rows_export.append({
@@ -207,7 +210,10 @@ if uploaded_files:
             'Patient Detail': patient_detail,
             'Product Detail': product_details_combined,
             'Event Details': event_details_combined_export,
-            'Narrative': narrative_full
+            'Narrative': narrative_full,
+            'Listedness': '',
+            'Validity': '',
+            'App Assessment': ''
         })
 
     # Display combined table with scroll and single-line
@@ -229,6 +235,10 @@ if uploaded_files:
 
     st.markdown(f'<div class="scroll-container">{df_display.to_html(index=False, escape=False)}</div>', unsafe_allow_html=True)
 
+    # Clear Filter Button
+    if st.button("Clear Filters"):
+        st.experimental_rerun()
+
     # Export options
     df_export = pd.DataFrame(all_rows_export)
     csv = df_export.to_csv(index=False)
@@ -238,3 +248,4 @@ if uploaded_files:
 
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
