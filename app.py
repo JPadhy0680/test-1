@@ -37,7 +37,7 @@ table {
 """, unsafe_allow_html=True)
 
 # ✅ Application Name
-st.title("📌 E2B XML Parser Application")
+st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 
 # ✅ Password Protection
 password = st.text_input("Enter Password to Access App:", type="password", help="Enter the password to unlock the application.")
@@ -61,7 +61,7 @@ all_rows_display = []
 current_date = datetime.now().strftime("%d-%b-%Y")
 
 with tab1:
-    st.markdown("### 🔍 Upload Files")
+    st.markdown("### 🔍 Upload Files 🗂️")
     if st.button("Clear Inputs", help="Click to clear all uploaded files and reset the app."):
         st.session_state.clear()
         st.experimental_rerun()
@@ -108,7 +108,7 @@ with tab1:
         "abiraterone", "apixaban", "apremilast", "bexarotene", "clobazam", "clonazepam",
         "dabigatran", "dapagliflozin", "dimethyl fumarate", "famotidine", "fesoterodine",
         "icatibant", "linagliptin", "pirfenidone", "ranolazine", "rivaroxaban", "saxagliptin",
-        "sitagliptin", "solifenacin + tamsulosin", "tapentadol", "ticagrelor", "nintedanib"
+        "sitagliptin", "solifenacin", "tamsulosin", "tapentadol", "ticagrelor", "nintedanib"
     ]
 
     seriousness_map = {
@@ -243,7 +243,7 @@ with tab1:
             progress.progress(idx / len(uploaded_files))
 
 with tab2:
-    st.markdown("### 📋 Parsed Data Table")
+    st.markdown("### 📋 Parsed Data Table 🧾")
     if all_rows_display:
         df_display = pd.DataFrame(all_rows_display)
         editable_cols = ['Listedness', 'Validity', 'App Assessment']
@@ -251,7 +251,7 @@ with tab2:
         edited_df = st.data_editor(df_display, num_rows="dynamic", use_container_width=True, disabled=disabled_cols)
 
         # Summary Statistics
-        st.markdown("### 📊 Summary Statistics")
+        st.markdown("### 📊 Summary Statistics 🌐")
         summary_data = {
             "Total Cases": len(edited_df),
             "Reporter Qualification Counts": edited_df['Reporter Qualification'].value_counts().to_dict(),
