@@ -114,31 +114,44 @@ if uploaded_file:
         "congenitalAnomalyBirthDefect",
         "otherMedicallyImportantCondition"
     ]
-    event_details_list = []
-    event_count = 1
-    llt_codes = []
-    for reaction in root.findall('.//hl7:observation', ns):
-        code_elem = reaction.find('hl7:code', ns)
-        if code_elem is not None and code_elem.attrib.get('displayName') == 'reaction':
-            value_elem = reaction.find('hl7:value', ns)
-            event_code = value_elem.attrib.get('code', '') if value_elem is not None else ''
-            if event_code:
-                llt_codes.append(event_code)
-            original_text_elem = value_elem.find('hl7:originalText', ns) if value_elem is not None else None
-            event_text = original_text_elem.text if original_text_elem is not None else ''
-            event_name = f"{event_code} - {event_text}".strip()
+    
+event_details_list = []
+event_count = 1
+llt_codes = []
+
+for reaction in root.findall('.//hl7:observation', ns):
+    code_elem = reaction.find('hl7:code', ns)
+    if code_elem is not None and code_elem.attrib.get('displayName') == 'reaction':
+        value_elem = reaction.find('hl7:value', ns)
+        llt_code = value_elem.attrib.get('code', '') if value_elem is not None else ''
+        if llt_code:
+            llt_codes.append(llt_code)
+
+            # Lookup LLT Term and PT Term
+            llt_term, pt_term = '', ''
+            if mapping_file:
+                row = mapping_df[mapping_df['LLT Code'] == int(llt_code)]
+                if not row.empty:
+                    llt_term = row['LLT Term'].values[0]
+                    pt_term = row['PT Term'].values[0]
+
+            # Seriousness flags
             seriousness_flags = []
             for criterion in seriousness_criteria:
                 criterion_elem = reaction.find(f'.//hl7:code[@displayName="{criterion}"]/../hl7:value', ns)
                 if criterion_elem is not None and criterion_elem.attrib.get('value') == 'true':
                     seriousness_flags.append(criterion)
+
             outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
             outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
-            details = f"Event {event_count}: {event_name} (Seriousness: {', '.join(seriousness_flags)}; Outcome: {outcome})"
+
+            # Build event detail string
+            details = f"Event {event_count}: {llt_term} ({pt_term}) (Seriousness: {', '.join(seriousness_flags)}; Outcome: {outcome})"
             event_details_list.append(details)
             event_count += 1
 
-    event_details_combined = "\n".join(event_details_list)
+event_details_combined = "\n".join(event_details_list)
+
 
     # Narrative
     narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
