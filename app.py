@@ -119,6 +119,7 @@ if uploaded_file:
     llt_codes = []
 
     mapping_df = pd.read_excel(mapping_file) if mapping_file else None
+    llt_terms_list, pt_terms_list = [], []
 
     for reaction in root.findall('.//hl7:observation', ns):
         code_elem = reaction.find('hl7:code', ns)
@@ -129,12 +130,15 @@ if uploaded_file:
                 llt_codes.append(llt_code)
 
                 # Lookup LLT Term and PT Term
-                llt_term, pt_term = llt_code, ''  # fallback to LLT code
+                llt_term, pt_term = llt_code, ''  # fallback
                 if mapping_df is not None:
                     row = mapping_df[mapping_df['LLT Code'] == int(llt_code)]
                     if not row.empty:
                         llt_term = row['LLT Term'].values[0]
                         pt_term = row['PT Term'].values[0]
+
+                llt_terms_list.append(llt_term)
+                pt_terms_list.append(pt_term)
 
                 # Seriousness flags
                 seriousness_flags = []
@@ -157,17 +161,14 @@ if uploaded_file:
     st.write("✅ Extracted LLT Codes:", llt_codes)
     st.write("✅ Event Details:", event_details_list)
 
+    # Combine LLT/PT info for table
+    llt_codes_combined = ', '.join(llt_codes)
+    llt_terms_combined = ', '.join(llt_terms_list)
+    pt_terms_combined = ', '.join(pt_terms_list)
+
     # Narrative
     narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
     narrative = narrative_elem.text if narrative_elem is not None else ''
-
-    # Combine LLT/PT info for table
-    llt_terms_combined = ', '.join([llt_term for llt_term in [mapping_df[mapping_df['LLT Code'] == int(code)]['LLT Term'].values[0]
-                                    if mapping_df is not None and not mapping_df[mapping_df['LLT Code'] == int(code)].empty else code
-                                    for code in llt_codes])
-    pt_terms_combined = ', '.join([mapping_df[mapping_df['LLT Code'] == int(code)]['PT Term'].values[0]
-                                   for code in llt_codes if mapping_df is not None and not mapping_df[mapping_df['LLT Code'] == int(code)].empty])
-    llt_codes_combined = ', '.join(llt_codes)
 
     # Prepare DataFrame
     data = [{
@@ -198,6 +199,7 @@ if uploaded_file:
         df.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
 
 
