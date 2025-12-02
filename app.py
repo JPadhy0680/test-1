@@ -155,7 +155,8 @@ if uploaded_file:
                 if parts:
                     product_details_list.append(", ".join(parts))
 
-    product_details_combined = "\n".join(product_details_list)
+    product_details_combined_html = "<br>".join(product_details_list)
+    product_details_combined_excel = "\n".join(product_details_list)
 
     # Event Details
     seriousness_criteria = list(seriousness_map.keys())
@@ -188,54 +189,51 @@ if uploaded_file:
             event_details_list.append(details)
             event_count += 1
 
-    event_details_combined = "\n".join(event_details_list)
+    event_details_combined_html = "<br>".join(event_details_list)
+    event_details_combined_excel = "\n".join(event_details_list)
 
     # Narrative
     narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
     narrative = narrative_elem.text if narrative_elem is not None else ''
 
-    # Prepare DataFrame
-    data = [{
+    # Prepare DataFrame for display
+    df_display = pd.DataFrame([{
         'SL No': 1,
         'Date': current_date,
         'Sender ID': sender_id,
         'Transmission Date': transmission_date,
         'Reporter Qualification': reporter_qualification,
         'Patient Detail': patient_detail,
-        'Product Detail': product_details_combined,
-        'Event Details': event_details_combined,
+        'Product Detail': product_details_combined_html,
+        'Event Details': event_details_combined_html,
         'Narrative': narrative,
         'Listedness': '',
         'Validity': '',
         'Tool Assessment': ''
-    }]
-    df = pd.DataFrame(data)
+    }])
+
+    # Prepare DataFrame for export
+    df_export = pd.DataFrame([{
+        'SL No': 1,
+        'Date': current_date,
+        'Sender ID': sender_id,
+        'Transmission Date': transmission_date,
+        'Reporter Qualification': reporter_qualification,
+        'Patient Detail': patient_detail,
+        'Product Detail': product_details_combined_excel,
+        'Event Details': event_details_combined_excel,
+        'Narrative': narrative,
+        'Listedness': '',
+        'Validity': '',
+        'Tool Assessment': ''
+    }])
 
     # Display without index
-    st.write(df.to_html(index=False), unsafe_allow_html=True)
+    st.write(df_display.to_html(index=False, escape=False), unsafe_allow_html=True)
 
     # Export options
-    csv = df.to_csv(index=False)
+    csv = df_export.to_csv(index=False)
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False)
+        df_export.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
-    st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
