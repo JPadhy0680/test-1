@@ -128,8 +128,8 @@ if uploaded_file:
     for reaction in root.findall('.//hl7:observation', ns):
         code_elem = reaction.find('hl7:code', ns)
         if code_elem is not None and code_elem.attrib.get('displayName') == 'reaction':
-            value_elem = reaction.find('hl7:value', ns)
-            event_name = value_elem.text if value_elem is not None else ''
+            # FIX: Get event name from code attributes
+            event_name = code_elem.attrib.get('code', '') or code_elem.attrib.get('displayName', '')
 
             seriousness_flags = []
             for criterion in seriousness_criteria:
@@ -140,10 +140,9 @@ if uploaded_file:
             outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
             outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
 
-            if event_name:
-                details = f"Event {event_count}: {event_name} (Seriousness: {', '.join(seriousness_flags)}; Outcome: {outcome})"
-                event_details_list.append(details)
-                event_count += 1
+            details = f"Event {event_count}: {event_name} (Seriousness: {', '.join(seriousness_flags)}; Outcome: {outcome})"
+            event_details_list.append(details)
+            event_count += 1
 
     event_details_combined = "\n".join(event_details_list)
 
@@ -180,6 +179,7 @@ if uploaded_file:
 
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
 
 
