@@ -21,15 +21,6 @@ body {
     padding-left: 1rem;
     padding-right: 1rem;
 }
-.scroll-container {
-    overflow-x: auto;
-    overflow-y: auto;
-    max-height: 500px;
-    border: 1px solid #ddd;
-    padding: 10px;
-    padding-bottom: 30px; /* Extra space for scroll bar */
-    width: 100%;
-}
 table {
     white-space: pre-wrap; /* Multi-line cells */
     width: 100%;
@@ -55,7 +46,7 @@ with st.expander("📖 Instructions"):
     - Upload **multiple E2B XML files** and **LLT-PT mapping Excel file**.
     - Combined data will be displayed in the Export & Edit tab.
     - You can edit Listedness, Validity, and App Assessment directly in the table.
-    - Download options for CSV, Excel, and PDF are available side by side.
+    - Download options for CSV, Excel, PDF, and Summary Statistics are available side by side.
     """)
 
 # Tabs for navigation
@@ -66,12 +57,10 @@ current_date = datetime.now().strftime("%d-%b-%Y")
 
 with tab1:
     st.markdown("### 🔍 Upload Files")
-    # Clear Inputs Button
     if st.button("Clear Inputs", help="Click to clear all uploaded files and reset the app."):
         st.session_state.clear()
         st.experimental_rerun()
 
-    # File Uploads with tooltips
     uploaded_files = st.file_uploader("Upload E2B XML files", type=["xml"], accept_multiple_files=True, help="Upload one or more E2B XML files for parsing.")
     mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"], help="Upload the MedDRA LLT-PT mapping Excel file.")
 
@@ -144,7 +133,7 @@ with tab1:
             reporter_qualification = map_reporter(reporter_elem.attrib.get('code', '') if reporter_elem is not None else '')
 
             gender_elem = root.find('.//hl7:administrativeGenderCode', ns)
-            gender = map_gender(gender_elem.attrib.get('code', '') if gender_elem is not None else ''
+            gender = map_gender(gender_elem.attrib.get('code', '') if gender_elem is not None else '')
 
             age_elem = root.find('.//hl7:code[@displayName="age"]/../hl7:value', ns)
             age = f"{age_elem.attrib.get('value', '')} {age_elem.attrib.get('unit', '')}" if age_elem is not None else ''
@@ -256,13 +245,23 @@ with tab2:
         disabled_cols = [col for col in df_display.columns if col not in editable_cols]
         edited_df = st.data_editor(df_display, num_rows="dynamic", use_container_width=True, disabled=disabled_cols)
 
-        # Export edited values
+        # Summary Statistics
+        st.markdown("### 📊 Summary Statistics")
+        summary_data = {
+            "Total Cases": len(edited_df),
+            "Reporter Qualification Counts": edited_df['Reporter Qualification'].value_counts().to_dict(),
+            "Gender Counts": edited_df['Patient Detail'].str.extract(r'Gender: (\w+)')[0].value_counts().to_dict()
+        }
+        summary_df = pd.DataFrame(list(summary_data.items()), columns=["Metric", "Value"])
+        st.table(summary_df)
+
+        # Export main table
         csv = edited_df.to_csv(index=False)
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
             edited_df.to_excel(writer, index=False)
 
-        # Generate PDF
+        # Export PDF for main table
         pdf_buffer = io.BytesIO()
         c = canvas.Canvas(pdf_buffer, pagesize=letter)
         textobject = c.beginText(40, 750)
@@ -274,14 +273,31 @@ with tab2:
         c.save()
         pdf_buffer.seek(0)
 
+        # Export summary
+        summary_csv = summary_df.to_csv(index=False)
+        summary_pdf_buffer = io.BytesIO()
+        c = canvas.Canvas(summary_pdf_buffer, pagesize=letter)
+        textobject = c.beginText(40, 750)
+        textobject.setFont("Helvetica", 10)
+        for row in summary_df.to_string(index=False).split("\n"):
+            textobject.textLine(row)
+        c.drawText(textobject)
+        c.showPage()
+        c.save()
+        summary_pdf_buffer.seek(0)
+
         # Download buttons side by side
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            st.download_button("⬇️ Download CSV", csv, "parsed_data.csv")
+            st.download_button("⬇️ CSV", csv, "parsed_data.csv")
         with col2:
-            st.download_button("⬇️ Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+            st.download_button("⬇️ Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
         with col3:
-            st.download_button("⬇️ Download PDF", pdf_buffer.getvalue(), "parsed_data.pdf")
+            st.download_button("⬇️ PDF", pdf_buffer.getvalue(), "parsed_data.pdf")
+        with col4:
+            st.download_button("⬇️ Summary CSV", summary_csv, "summary.csv")
+        with col5:
+            st.download_button("⬇️ Summary PDF", summary_pdf_buffer.getvalue(), "summary.pdf")
     else:
         st.info("No data available yet. Please upload files in the first tab.")
 
@@ -292,6 +308,7 @@ st.markdown("""
     <i>Disclaimer: App is in developmental stage, validate before using the data.</i>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
