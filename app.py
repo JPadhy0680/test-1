@@ -11,6 +11,9 @@ st.set_page_config(layout="wide")
 # Custom CSS for layout optimization
 st.markdown("""
 <style>
+body {
+    background-color: #ffe6e6; /* Light pink background */
+}
 .block-container {
     padding-top: 1rem;
     padding-left: 1rem;
@@ -22,6 +25,7 @@ st.markdown("""
     max-height: 500px;
     border: 1px solid #ddd;
     padding: 10px;
+    padding-bottom: 30px; /* Extra space for scroll bar */
     width: 100%;
 }
 table {
@@ -63,7 +67,6 @@ uploaded_files = st.file_uploader("Upload E2B XML files", type=["xml"], accept_m
 mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"])
 
 all_rows_display = []
-all_rows_export = []
 current_date = datetime.now().strftime("%d-%b-%Y")
 mapping_df = pd.read_excel(mapping_file) if mapping_file else None
 
@@ -214,9 +217,7 @@ if uploaded_files:
                 event_details_list.append(details)
                 event_count += 1
 
-        event_details_combined_display = "<br>".join(event_details_list)
-        event_details_combined_export = "\n".join(event_details_list)
-
+        event_details_combined_display = "\n".join(event_details_list)  # ✅ No <br>
         narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
         narrative_full = narrative_elem.text if narrative_elem is not None else ''
         narrative_display = " ".join(narrative_full.split()[:10]) + "..." if len(narrative_full.split()) > 10 else narrative_full
@@ -236,21 +237,6 @@ if uploaded_files:
             'App Assessment': ''
         })
 
-        all_rows_export.append({
-            'SL No': idx,
-            'Date': current_date,
-            'Sender ID': sender_id,
-            'Transmission Date': transmission_date,
-            'Reporter Qualification': reporter_qualification,
-            'Patient Detail': patient_detail,
-            'Product Detail': product_details_combined,
-            'Event Details': event_details_combined_export,
-            'Narrative': narrative_full,
-            'Listedness': '',
-            'Validity': '',
-            'App Assessment': ''
-        })
-
     # Editable Table (only last 3 columns editable)
     df_display = pd.DataFrame(all_rows_display)
     editable_cols = ['Listedness', 'Validity', 'App Assessment']
@@ -258,11 +244,10 @@ if uploaded_files:
     edited_df = st.data_editor(df_display, num_rows="dynamic", use_container_width=True, disabled=disabled_cols)
 
     # Export edited values
-    df_export = edited_df.copy()
-    csv = df_export.to_csv(index=False)
+    csv = edited_df.to_csv(index=False)
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        df_export.to_excel(writer, index=False)
+        edited_df.to_excel(writer, index=False)
 
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
@@ -274,6 +259,7 @@ st.markdown("""
     <i>Disclaimer: App is in developmental stage, validate before using the data.</i>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
