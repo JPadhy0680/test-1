@@ -46,8 +46,28 @@ company_products = [
     "sitagliptin", "solifenacin + tamsulosin", "tapentadol", "ticagrelor", "nintedanib"
 ]
 
+# Seriousness mapping
+seriousness_map = {
+    "resultsInDeath": "Death",
+    "isLifeThreatening": "LT",
+    "requiresInpatientHospitalization": "Hospital",
+    "resultsInPersistentOrSignificantDisability": "Disability",
+    "congenitalAnomalyBirthDefect": "Congenital",
+    "otherMedicallyImportantCondition": "IME"
+}
+
 # UI
 st.title("👉 E2B XML Parser with Company Suspect Products ✅")
+st.markdown("""
+### Instructions:
+1. Upload the E2B XML file.
+2. Upload the LLT-PT mapping Excel file.
+3. The output table will include:
+   - Patient details (only non-empty fields)
+   - Suspect company products with dosage and other details
+   - Event details with seriousness mapped to short labels
+4. Download options for CSV and Excel are provided below.
+""")
 
 uploaded_file = st.file_uploader("Upload E2B XML file", type=["xml"])
 mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"])
@@ -138,11 +158,7 @@ if uploaded_file:
     product_details_combined = "\n".join(product_details_list)
 
     # Event Details
-    seriousness_criteria = [
-        "resultsInDeath", "isLifeThreatening", "requiresInpatientHospitalization",
-        "resultsInPersistentOrSignificantDisability", "congenitalAnomalyBirthDefect",
-        "otherMedicallyImportantCondition"
-    ]
+    seriousness_criteria = list(seriousness_map.keys())
     event_details_list = []
     event_count = 1
     mapping_df = pd.read_excel(mapping_file) if mapping_file else None
@@ -163,7 +179,7 @@ if uploaded_file:
             for criterion in seriousness_criteria:
                 criterion_elem = reaction.find(f'.//hl7:code[@displayName="{criterion}"]/../hl7:value', ns)
                 if criterion_elem is not None and criterion_elem.attrib.get('value') == 'true':
-                    seriousness_flags.append(criterion)
+                    seriousness_flags.append(seriousness_map.get(criterion, criterion))
 
             outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
             outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
@@ -205,6 +221,7 @@ if uploaded_file:
         df.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
 
 
