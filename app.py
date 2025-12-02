@@ -4,11 +4,9 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import datetime
 import io
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
 
 # Configure page layout
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="E2B XML Parser", layout="wide")
 
 # Custom CSS for layout optimization
 st.markdown("""
@@ -31,8 +29,15 @@ table {
     color: gray;
     text-align: center;
 }
+.download-buttons {
+    display: flex;
+    gap: 10px;
+}
 </style>
 """, unsafe_allow_html=True)
+
+# ✅ Application Name
+st.title("📌 E2B XML Parser Application")
 
 # ✅ Password Protection
 password = st.text_input("Enter Password to Access App:", type="password", help="Enter the password to unlock the application.")
@@ -46,7 +51,7 @@ with st.expander("📖 Instructions"):
     - Upload **multiple E2B XML files** and **LLT-PT mapping Excel file**.
     - Combined data will be displayed in the Export & Edit tab.
     - You can edit Listedness, Validity, and App Assessment directly in the table.
-    - Download options for CSV, Excel, PDF, and Summary Statistics are available side by side.
+    - Download options for CSV, Excel, HTML (openable as PDF), and Summary Statistics are available side by side.
     """)
 
 # Tabs for navigation
@@ -261,30 +266,16 @@ with tab2:
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
             edited_df.to_excel(writer, index=False)
 
-        # Export PDF for main table
-        pdf_buffer = io.BytesIO()
-        c = canvas.Canvas(pdf_buffer, pagesize=letter)
-        textobject = c.beginText(40, 750)
-        textobject.setFont("Helvetica", 8)
-        for row in edited_df.to_string(index=False).split("\n"):
-            textobject.textLine(row)
-        c.drawText(textobject)
-        c.showPage()
-        c.save()
-        pdf_buffer.seek(0)
+        # HTML export for main table
+        html_buffer = io.BytesIO()
+        html_buffer.write(edited_df.to_html(index=False).encode('utf-8'))
+        html_buffer.seek(0)
 
         # Export summary
         summary_csv = summary_df.to_csv(index=False)
-        summary_pdf_buffer = io.BytesIO()
-        c = canvas.Canvas(summary_pdf_buffer, pagesize=letter)
-        textobject = c.beginText(40, 750)
-        textobject.setFont("Helvetica", 10)
-        for row in summary_df.to_string(index=False).split("\n"):
-            textobject.textLine(row)
-        c.drawText(textobject)
-        c.showPage()
-        c.save()
-        summary_pdf_buffer.seek(0)
+        summary_html_buffer = io.BytesIO()
+        summary_html_buffer.write(summary_df.to_html(index=False).encode('utf-8'))
+        summary_html_buffer.seek(0)
 
         # Download buttons side by side
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -293,11 +284,11 @@ with tab2:
         with col2:
             st.download_button("⬇️ Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
         with col3:
-            st.download_button("⬇️ PDF", pdf_buffer.getvalue(), "parsed_data.pdf")
+            st.download_button("⬇️ HTML (PDF)", html_buffer.getvalue(), "parsed_data.html")
         with col4:
             st.download_button("⬇️ Summary CSV", summary_csv, "summary.csv")
         with col5:
-            st.download_button("⬇️ Summary PDF", summary_pdf_buffer.getvalue(), "summary.pdf")
+            st.download_button("⬇️ Summary HTML", summary_html_buffer.getvalue(), "summary.html")
     else:
         st.info("No data available yet. Please upload files in the first tab.")
 
@@ -308,6 +299,7 @@ st.markdown("""
     <i>Disclaimer: App is in developmental stage, validate before using the data.</i>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
