@@ -43,16 +43,11 @@ if password != "7064242966":
     st.warning("Please enter the correct password to proceed.")
     st.stop()
 
-# ✅ Embedded MedDRA Mapping File
-# Replace this with actual path or embedded data
-embedded_mapping_path = "meddra_mapping.xlsx"
-mapping_df = pd.read_excel(embedded_mapping_path)
-
 # UI
 st.title("📊 E2B XML Parser with Multiple File Support")
 st.markdown("""
 ### ✅ Instructions:
-- Upload **multiple E2B XML files**.
+- Upload **multiple E2B XML files** and **LLT-PT mapping Excel file**.
 - Combined data will be displayed in a scrollable window.
 - You can edit Listedness, Validity, and App Assessment directly in the table.
 - Download options for CSV and Excel are available below.
@@ -65,10 +60,61 @@ if st.button("Clear Inputs"):
 
 # File Uploads
 uploaded_files = st.file_uploader("Upload E2B XML files", type=["xml"], accept_multiple_files=True)
+mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"])
 
 all_rows_display = []
 all_rows_export = []
 current_date = datetime.now().strftime("%d-%b-%Y")
+mapping_df = pd.read_excel(mapping_file) if mapping_file else None
+
+# Helper Functions
+def format_date(date_str):
+    if not date_str or len(date_str) < 8:
+        return ""
+    try:
+        return datetime.strptime(date_str[:8], "%Y%m%d").strftime("%d-%b-%Y")
+    except ValueError:
+        return ""
+
+def map_reporter(code):
+    mapping = {
+        "1": "Physician",
+        "2": "Pharmacist",
+        "3": "Other health professional",
+        "4": "Lawyer",
+        "5": "Consumer or other non-health professional"
+    }
+    return mapping.get(code, "Unknown")
+
+def map_gender(code):
+    return {"1": "Male", "2": "Female"}.get(code, "Unknown")
+
+def map_outcome(code):
+    mapping = {
+        "1": "Recovered/Resolved",
+        "2": "Recovering/Resolving",
+        "3": "Not recovered/Ongoing",
+        "4": "Recovered with sequelae",
+        "5": "Fatal",
+        "0": "Unknown"
+    }
+    return mapping.get(code, "Unknown")
+
+company_products = [
+    "abiraterone", "apixaban", "apremilast", "bexarotene", "clobazam", "clonazepam",
+    "dabigatran", "dapagliflozin", "dimethyl fumarate", "famotidine", "fesoterodine",
+    "icatibant", "linagliptin", "pirfenidone", "ranolazine", "rivaroxaban", "saxagliptin",
+    "sitagliptin", "solifenacin + tamsulosin", "tapentadol", "ticagrelor", "nintedanib"
+]
+
+seriousness_map = {
+    "resultsInDeath": "Death",
+    "isLifeThreatening": "LT",
+    "requiresInpatientHospitalization": "Hospital",
+    "resultsInPersistentOrSignificantDisability": "Disability",
+    "congenitalAnomalyBirthDefect": "Congenital",
+    "otherMedicallyImportantCondition": "IME"
+}
 
 if uploaded_files:
     for idx, uploaded_file in enumerate(uploaded_files, start=1):
@@ -76,7 +122,6 @@ if uploaded_files:
         root = tree.getroot()
         ns = {'hl7': 'urn:hl7-org:v3'}
 
-        # Extract basic info
         sender_elem = root.find('.//hl7:id[@root="2.16.840.1.113883.3.989.2.1.3.1"]', ns)
         sender_id = sender_elem.attrib.get('extension', '') if sender_elem is not None else ''
 
@@ -98,7 +143,6 @@ if uploaded_files:
         height_elem = root.find('.//hl7:code[@displayName="height"]/../hl7:value', ns)
         height = f"{height_elem.attrib.get('value', '')} {height_elem.attrib.get('unit', '')}" if height_elem is not None else ''
 
-        # Patient details
         patient_parts = []
         if gender: patient_parts.append(f"Gender: {gender}")
         if age: patient_parts.append(f"Age: {age}")
@@ -106,7 +150,6 @@ if uploaded_files:
         if weight: patient_parts.append(f"Weight: {weight}")
         patient_detail = ", ".join(patient_parts)
 
-        # Suspect drug IDs
         suspect_ids = []
         for causality in root.findall('.//hl7:causalityAssessment', ns):
             val_elem = causality.find('.//hl7:value', ns)
@@ -115,7 +158,6 @@ if uploaded_files:
                 if subj_id_elem is not None:
                     suspect_ids.append(subj_id_elem.attrib.get('root', ''))
 
-        # Product details
         product_details_list = []
         for drug in root.findall('.//hl7:substanceAdministration', ns):
             id_elem = drug.find('.//hl7:id', ns)
@@ -147,7 +189,6 @@ if uploaded_files:
 
         product_details_combined = " | ".join(product_details_list)
 
-        # Event details
         seriousness_criteria = list(seriousness_map.keys())
         event_details_list = []
         event_count = 1
@@ -176,12 +217,10 @@ if uploaded_files:
         event_details_combined_display = "<br>".join(event_details_list)
         event_details_combined_export = "\n".join(event_details_list)
 
-        # Narrative
         narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
         narrative_full = narrative_elem.text if narrative_elem is not None else ''
         narrative_display = " ".join(narrative_full.split()[:10]) + "..." if len(narrative_full.split()) > 10 else narrative_full
 
-        # Append rows
         all_rows_display.append({
             'SL No': idx,
             'Date': current_date,
@@ -218,8 +257,8 @@ if uploaded_files:
     disabled_cols = [col for col in df_display.columns if col not in editable_cols]
     edited_df = st.data_editor(df_display, num_rows="dynamic", use_container_width=True, disabled=disabled_cols)
 
-    # Export options
-    df_export = pd.DataFrame(all_rows_export)
+    # Export edited values
+    df_export = edited_df.copy()
     csv = df_export.to_csv(index=False)
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
@@ -235,6 +274,7 @@ st.markdown("""
     <i>Disclaimer: App is in developmental stage, validate before using the data.</i>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
