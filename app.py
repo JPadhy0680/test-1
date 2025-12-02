@@ -61,7 +61,7 @@ st.title("📊 E2B XML Parser with Multiple File Support")
 st.markdown("""
 ### ✅ Instructions:
 - Upload **multiple E2B XML files** and **LLT-PT mapping Excel file**.
-- Combined data will be displayed in a single table.
+- Combined data will be displayed in a scrollable window.
 - Download options for CSV and Excel are available below.
 """)
 
@@ -69,7 +69,8 @@ st.markdown("""
 uploaded_files = st.file_uploader("Upload E2B XML files", type=["xml"], accept_multiple_files=True)
 mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"])
 
-all_rows = []
+all_rows_display = []
+all_rows_export = []
 current_date = datetime.now().strftime("%d-%b-%Y")
 mapping_df = pd.read_excel(mapping_file) if mapping_file else None
 
@@ -148,7 +149,7 @@ if uploaded_files:
                     if stop_date: parts.append(f"Stop Date: {stop_date}")
                     if parts: product_details_list.append(" | ".join(parts))
 
-        product_details_combined_excel = " | ".join(product_details_list)
+        product_details_combined = " | ".join(product_details_list)
 
         # Event details
         seriousness_criteria = list(seriousness_map.keys())
@@ -176,34 +177,47 @@ if uploaded_files:
                 event_details_list.append(details)
                 event_count += 1
 
-        event_details_combined_excel = " | ".join(event_details_list)
+        event_details_combined_display = "<br>".join(event_details_list)  # For HTML display
+        event_details_combined_export = "\n".join(event_details_list)     # For export
 
         # Narrative
         narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
-        narrative = narrative_elem.text if narrative_elem is not None else ''
+        narrative_full = narrative_elem.text if narrative_elem is not None else ''
+        narrative_display = " ".join(narrative_full.split()[:10]) + "..." if len(narrative_full.split()) > 10 else narrative_full
 
-        # Append row
-        all_rows.append({
+        # Append rows
+        all_rows_display.append({
             'SL No': idx,
             'Date': current_date,
             'Sender ID': sender_id,
             'Transmission Date': transmission_date,
             'Reporter Qualification': reporter_qualification,
             'Patient Detail': patient_detail,
-            'Product Detail': product_details_combined_excel,
-            'Event Details': event_details_combined_excel,
-            'Narrative': narrative,
-            'Listedness': '',
-            'Validity': '',
-            'Tool Assessment': ''
+            'Product Detail': product_details_combined,
+            'Event Details': event_details_combined_display,
+            'Narrative': narrative_display
+        })
+
+        all_rows_export.append({
+            'SL No': idx,
+            'Date': current_date,
+            'Sender ID': sender_id,
+            'Transmission Date': transmission_date,
+            'Reporter Qualification': reporter_qualification,
+            'Patient Detail': patient_detail,
+            'Product Detail': product_details_combined,
+            'Event Details': event_details_combined_export,
+            'Narrative': narrative_full
         })
 
     # Display combined table with scroll and single-line
-    df_display = pd.DataFrame(all_rows)
+    df_display = pd.DataFrame(all_rows_display)
     st.markdown("""
     <style>
     .scroll-container {
         overflow-x: auto;
+        overflow-y: auto;
+        max-height: 400px;
         border: 1px solid #ddd;
         padding: 10px;
     }
@@ -215,23 +229,12 @@ if uploaded_files:
 
     st.markdown(f'<div class="scroll-container">{df_display.to_html(index=False, escape=False)}</div>', unsafe_allow_html=True)
 
-    # Maximize button
-    if st.button("🔍 Maximize Table"):
-        st.markdown(f'<div style="overflow-x:auto; width:100%; height:600px;">{df_display.to_html(index=False, escape=False)}</div>', unsafe_allow_html=True)
-
     # Export options
-    csv = df_display.to_csv(index=False)
+    df_export = pd.DataFrame(all_rows_export)
+    csv = df_export.to_csv(index=False)
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        df_display.to_excel(writer, index=False)
+        df_export.to_excel(writer, index=False)
 
     st.download_button("Download CSV", csv, "parsed_data.csv")
-
-
-
-
-
-
-
-
-
+    st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
