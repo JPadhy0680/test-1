@@ -43,7 +43,7 @@ def map_outcome(code):
     return mapping.get(code, "Unknown")
 
 # ---------------- Streamlit UI ---------------- #
-st.title("👉 E2B XML Parser with Updated Table Format ✅")
+st.title("👉 E2B XML Parser with Product Detail ✅")
 
 uploaded_file = st.file_uploader("Upload E2B XML file", type=["xml"])
 mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"])
@@ -79,34 +79,38 @@ if uploaded_file:
     # Combine patient details
     patient_detail = f"Gender: {gender}, Age: {age}, Height: {height}, Weight: {weight}"
 
-    # Suspect drugs
-    drugs_info = {}
+    # Product Details
+    product_details_list = []
     for drug in root.findall('.//hl7:substanceAdministration', ns):
-        id_elem = drug.find('.//hl7:id', ns)
-        drug_id = id_elem.attrib.get('root', '') if id_elem is not None else ''
         name_elem = drug.find('.//hl7:kindOfProduct/hl7:name', ns)
         drug_name = name_elem.text if name_elem is not None else ''
+
+        text_elem = drug.find('.//hl7:text', ns)
+        dosage_text = text_elem.text if text_elem is not None else ''
+
+        dose_elem = drug.find('.//hl7:doseQuantity', ns)
+        dose = f"{dose_elem.attrib.get('value', '')} {dose_elem.attrib.get('unit', '')}" if dose_elem is not None else ''
+
+        form_elem = drug.find('.//hl7:formCode/hl7:originalText', ns)
+        formulation = form_elem.text if form_elem is not None else ''
+
+        lot_elem = drug.find('.//hl7:lotNumberText', ns)
+        lot_no = lot_elem.text if lot_elem is not None else ''
+
         start_elem = drug.find('.//hl7:low', ns)
         start_date = format_date(start_elem.attrib.get('value', '') if start_elem is not None else '')
+
         stop_elem = drug.find('.//hl7:high', ns)
         stop_date = format_date(stop_elem.attrib.get('value', '') if stop_elem is not None else '')
-        drugs_info[drug_id] = {'name': drug_name, 'start': start_date, 'stop': stop_date}
 
-    suspect_drugs, suspect_starts, suspect_stops = [], [], []
-    for causality in root.findall('.//hl7:causalityAssessment', ns):
-        val_elem = causality.find('.//hl7:value', ns)
-        if val_elem is not None and val_elem.attrib.get('code') == '1':
-            subj_id_elem = causality.find('.//hl7:subject2/hl7:productUseReference/hl7:id', ns)
-            if subj_id_elem is not None:
-                ref_id = subj_id_elem.attrib.get('root', '')
-                if ref_id in drugs_info:
-                    suspect_drugs.append(drugs_info[ref_id]['name'])
-                    suspect_starts.append(drugs_info[ref_id]['start'])
-                    suspect_stops.append(drugs_info[ref_id]['stop'])
+        product_detail = (
+            f"Drug: {drug_name}, Dosage: {dosage_text}, Dose: {dose}, "
+            f"Formulation: {formulation}, Lot No: {lot_no}, "
+            f"Start Date: {start_date}, Stop Date: {stop_date}"
+        )
+        product_details_list.append(product_detail)
 
-    drug_names_combined = ', '.join(suspect_drugs)
-    start_dates_combined = ', '.join(suspect_starts)
-    stop_dates_combined = ', '.join(suspect_stops)
+    product_details_combined = "\n".join(product_details_list)
 
     # Event Details
     seriousness_criteria = [
@@ -161,9 +165,7 @@ if uploaded_file:
         'Transmission Date': transmission_date,
         'Reporter Qualification': reporter_qualification,
         'Patient Detail': patient_detail,
-        'Drug Names': drug_names_combined,
-        'Start Dates': start_dates_combined,
-        'Stop Dates': stop_dates_combined,
+        'Product Detail': product_details_combined,
         'Event Details': event_details_combined,
         'Narrative': narrative,
         'Listedness': '',
@@ -173,7 +175,7 @@ if uploaded_file:
     df = pd.DataFrame(data)
 
     # Display without index
-    st.dataframe(df, use_container_width=True)
+    st.write(df.to_html(index=False), unsafe_allow_html=True)
 
     # Export options
     csv = df.to_csv(index=False)
@@ -182,6 +184,7 @@ if uploaded_file:
         df.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
 
 
