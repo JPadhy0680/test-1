@@ -165,10 +165,15 @@ if uploaded_file:
         'Start Dates': start_dates_combined,
         'Stop Dates': stop_dates_combined,
         'Event Details': event_details_combined,
-        'Narrative': narrative
+        'Narrative': narrative,
+        'Listedness': '',
+        'Validity': '',
+        'Tool Assessment': ''
     }]
     df = pd.DataFrame(data)
-    st.dataframe(df)
+
+    # Display without index
+    st.dataframe(df, use_container_width=True)
 
     # Export options
     csv = df.to_csv(index=False)
@@ -177,6 +182,7 @@ if uploaded_file:
         df.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
 
 
