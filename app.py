@@ -43,7 +43,7 @@ def map_outcome(code):
     return mapping.get(code, "Unknown")
 
 # ---------------- Streamlit UI ---------------- #
-st.title("👉 E2B XML Parser with LLT/PT Mapping ✅")
+st.title("👉 E2B XML Parser with Updated Table Format ✅")
 
 uploaded_file = st.file_uploader("Upload E2B XML file", type=["xml"])
 mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"])
@@ -76,6 +76,9 @@ if uploaded_file:
     height_elem = root.find('.//hl7:code[@displayName="height"]/../hl7:value', ns)
     height = f"{height_elem.attrib.get('value', '')} {height_elem.attrib.get('unit', '')}" if height_elem is not None else ''
 
+    # Combine patient details
+    patient_detail = f"Gender: {gender}, Age: {age}, Height: {height}, Weight: {weight}"
+
     # Suspect drugs
     drugs_info = {}
     for drug in root.findall('.//hl7:substanceAdministration', ns):
@@ -105,7 +108,7 @@ if uploaded_file:
     start_dates_combined = ', '.join(suspect_starts)
     stop_dates_combined = ', '.join(suspect_stops)
 
-    # Event Details and LLT Codes
+    # Event Details
     seriousness_criteria = [
         "resultsInDeath",
         "isLifeThreatening",
@@ -116,77 +119,52 @@ if uploaded_file:
     ]
     event_details_list = []
     event_count = 1
-    llt_codes = []
 
     mapping_df = pd.read_excel(mapping_file) if mapping_file else None
-    llt_terms_list, pt_terms_list = [], []
 
     for reaction in root.findall('.//hl7:observation', ns):
         code_elem = reaction.find('hl7:code', ns)
         if code_elem is not None and code_elem.attrib.get('displayName') == 'reaction':
             value_elem = reaction.find('hl7:value', ns)
             llt_code = value_elem.attrib.get('code', '') if value_elem is not None else ''
-            if llt_code:
-                llt_codes.append(llt_code)
+            llt_term, pt_term = llt_code, ''
+            if mapping_df is not None and llt_code:
+                row = mapping_df[mapping_df['LLT Code'] == int(llt_code)]
+                if not row.empty:
+                    llt_term = row['LLT Term'].values[0]
+                    pt_term = row['PT Term'].values[0]
 
-                # Lookup LLT Term and PT Term
-                llt_term, pt_term = llt_code, ''  # fallback
-                if mapping_df is not None:
-                    row = mapping_df[mapping_df['LLT Code'] == int(llt_code)]
-                    if not row.empty:
-                        llt_term = row['LLT Term'].values[0]
-                        pt_term = row['PT Term'].values[0]
+            seriousness_flags = []
+            for criterion in seriousness_criteria:
+                criterion_elem = reaction.find(f'.//hl7:code[@displayName="{criterion}"]/../hl7:value', ns)
+                if criterion_elem is not None and criterion_elem.attrib.get('value') == 'true':
+                    seriousness_flags.append(criterion)
 
-                llt_terms_list.append(llt_term)
-                pt_terms_list.append(pt_term)
+            outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
+            outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
 
-                # Seriousness flags
-                seriousness_flags = []
-                for criterion in seriousness_criteria:
-                    criterion_elem = reaction.find(f'.//hl7:code[@displayName="{criterion}"]/../hl7:value', ns)
-                    if criterion_elem is not None and criterion_elem.attrib.get('value') == 'true':
-                        seriousness_flags.append(criterion)
-
-                outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
-                outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
-
-                # Build event detail string
-                details = f"Event {event_count}: {llt_term} ({pt_term}) (Seriousness: {', '.join(seriousness_flags)}; Outcome: {outcome})"
-                event_details_list.append(details)
-                event_count += 1
+            details = f"Event {event_count}: {llt_term} ({pt_term}) (Seriousness: {', '.join(seriousness_flags)}; Outcome: {outcome})"
+            event_details_list.append(details)
+            event_count += 1
 
     event_details_combined = "\n".join(event_details_list)
-
-    # Debug info
-    st.write("✅ Extracted LLT Codes:", llt_codes)
-    st.write("✅ Event Details:", event_details_list)
-
-    # Combine LLT/PT info for table
-    llt_codes_combined = ', '.join(llt_codes)
-    llt_terms_combined = ', '.join(llt_terms_list)
-    pt_terms_combined = ', '.join(pt_terms_list)
 
     # Narrative
     narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
     narrative = narrative_elem.text if narrative_elem is not None else ''
 
-    # Prepare DataFrame
+    # Prepare DataFrame with new format
     data = [{
-        'Current Date': current_date,
+        'SL No': 1,
+        'Date': current_date,
         'Sender ID': sender_id,
         'Transmission Date': transmission_date,
         'Reporter Qualification': reporter_qualification,
-        'Gender': gender,
-        'Age': age,
-        'Weight': weight,
-        'Height': height,
+        'Patient Detail': patient_detail,
         'Drug Names': drug_names_combined,
         'Start Dates': start_dates_combined,
         'Stop Dates': stop_dates_combined,
         'Event Details': event_details_combined,
-        'LLT Codes': llt_codes_combined,
-        'LLT Terms': llt_terms_combined,
-        'PT Terms': pt_terms_combined,
         'Narrative': narrative
     }]
     df = pd.DataFrame(data)
@@ -199,6 +177,7 @@ if uploaded_file:
         df.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
 
 
