@@ -45,7 +45,7 @@ def map_outcome(code):
 
 # ---------------- Streamlit UI ---------------- #
 
-st.title("E2B XML Parser - Reaction-Based Seriousness Logic")
+st.title("👉 E2B XML Parser ✅")
 
 uploaded_file = st.file_uploader("Upload E2B XML file", type=["xml"])
 
