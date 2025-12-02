@@ -146,9 +146,9 @@ if uploaded_files:
                     stop_elem = drug.find('.//hl7:high', ns)
                     stop_date = format_date(stop_elem.attrib.get('value', '') if stop_elem is not None else '')
                     if stop_date: parts.append(f"Stop Date: {stop_date}")
-                    if parts: product_details_list.append(" \n ".join(parts))
+                    if parts: product_details_list.append(" | ".join(parts))
 
-        product_details_combined_excel = "\n".join(product_details_list)
+        product_details_combined_excel = " | ".join(product_details_list)
 
         # Event details
         seriousness_criteria = list(seriousness_map.keys())
@@ -176,12 +176,11 @@ if uploaded_files:
                 event_details_list.append(details)
                 event_count += 1
 
-        event_details_combined_excel = "\n".join(event_details_list)
+        event_details_combined_excel = " | ".join(event_details_list)
 
         # Narrative
         narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
         narrative = narrative_elem.text if narrative_elem is not None else ''
-        narrative_display = " ".join(narrative.split()[:10]) + "..." if len(narrative.split()) > 10 else narrative
 
         # Append row
         all_rows.append({
@@ -199,9 +198,26 @@ if uploaded_files:
             'Tool Assessment': ''
         })
 
-    # Display combined table
+    # Display combined table with scroll and single-line
     df_display = pd.DataFrame(all_rows)
-    st.markdown(df_display.to_html(index=False, escape=False), unsafe_allow_html=True)
+    st.markdown("""
+    <style>
+    .scroll-container {
+        overflow-x: auto;
+        border: 1px solid #ddd;
+        padding: 10px;
+    }
+    table {
+        white-space: nowrap;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown(f'<div class="scroll-container">{df_display.to_html(index=False, escape=False)}</div>', unsafe_allow_html=True)
+
+    # Maximize button
+    if st.button("🔍 Maximize Table"):
+        st.markdown(f'<div style="overflow-x:auto; width:100%; height:600px;">{df_display.to_html(index=False, escape=False)}</div>', unsafe_allow_html=True)
 
     # Export options
     csv = df_display.to_csv(index=False)
@@ -210,6 +226,7 @@ if uploaded_files:
         df_display.to_excel(writer, index=False)
 
     st.download_button("Download CSV", csv, "parsed_data.csv")
+
 
 
 
