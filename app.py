@@ -66,8 +66,23 @@ st.markdown("""
    - Patient details (only non-empty fields)
    - Suspect company products with dosage and other details
    - Event details with seriousness mapped to short labels
-4. Download options for CSV and Excel are provided below.
+4. Narrative will show first 10 words for display, full text in export.
+5. Download options for CSV and Excel are provided below.
 """)
+
+# Custom CSS for wider table and wrapping
+st.markdown("""
+<style>
+table {
+    width: 100%;
+    table-layout: fixed;
+}
+td {
+    word-wrap: break-word;
+    white-space: normal;
+}
+</style>
+""", unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader("Upload E2B XML file", type=["xml"])
 mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"])
@@ -195,6 +210,7 @@ if uploaded_file:
     # Narrative
     narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
     narrative = narrative_elem.text if narrative_elem is not None else ''
+    narrative_display = " ".join(narrative.split()[:10]) + "..." if len(narrative.split()) > 10 else narrative
 
     # Prepare DataFrame for display
     df_display = pd.DataFrame([{
@@ -206,7 +222,7 @@ if uploaded_file:
         'Patient Detail': patient_detail,
         'Product Detail': product_details_combined_html,
         'Event Details': event_details_combined_html,
-        'Narrative': narrative,
+        'Narrative': narrative_display,
         'Listedness': '',
         'Validity': '',
         'Tool Assessment': ''
@@ -229,7 +245,7 @@ if uploaded_file:
     }])
 
     # Display without index
-    st.write(df_display.to_html(index=False, escape=False), unsafe_allow_html=True)
+    st.markdown(df_display.to_html(index=False, escape=False), unsafe_allow_html=True)
 
     # Export options
     csv = df_export.to_csv(index=False)
@@ -237,3 +253,5 @@ if uploaded_file:
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
         df_export.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
+    st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
