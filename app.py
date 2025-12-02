@@ -86,7 +86,7 @@ if uploaded_file:
         start_elem = drug.find('.//hl7:low', ns)
         start_date = format_date(start_elem.attrib.get('value', '') if start_elem is not None else '')
         stop_elem = drug.find('.//hl7:high', ns)
-        stop_date = format_date(stop_elem.attrib.get('value', '') if stop_elem is not None else ''
+        stop_date = format_date(stop_elem.attrib.get('value', '') if stop_elem is not None else '')
         drugs_info[drug_id] = {'name': drug_name, 'start': start_date, 'stop': stop_date}
 
     suspect_drugs, suspect_starts, suspect_stops = [], [], []
@@ -105,7 +105,7 @@ if uploaded_file:
     start_dates_combined = ', '.join(suspect_starts)
     stop_dates_combined = ', '.join(suspect_stops)
 
-    # Event Details
+    # Event Details and LLT Codes
     seriousness_criteria = [
         "resultsInDeath",
         "isLifeThreatening",
@@ -189,6 +189,7 @@ if uploaded_file:
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
         df.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
+
 
 
 
