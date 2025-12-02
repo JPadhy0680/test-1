@@ -28,6 +28,12 @@ table {
     white-space: nowrap;
     width: 100%;
 }
+.footer {
+    margin-top: 20px;
+    font-size: 14px;
+    color: gray;
+    text-align: center;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -88,8 +94,14 @@ st.markdown("""
 ### ✅ Instructions:
 - Upload **multiple E2B XML files** and **LLT-PT mapping Excel file**.
 - Combined data will be displayed in a scrollable window.
+- You can edit Listedness, Validity, and App Assessment directly in the table.
 - Download options for CSV and Excel are available below.
 """)
+
+# Clear Inputs Button
+if st.button("Clear Inputs"):
+    st.session_state.clear()
+    st.experimental_rerun()
 
 # File Uploads
 uploaded_files = st.file_uploader("Upload E2B XML files", type=["xml"], accept_multiple_files=True)
@@ -242,9 +254,9 @@ if uploaded_files:
             'App Assessment': ''
         })
 
-    # Display combined table with scroll and single-line
+    # Editable Table
     df_display = pd.DataFrame(all_rows_display)
-    st.markdown(f'<div class="scroll-container">{df_display.to_html(index=False, escape=False)}</div>', unsafe_allow_html=True)
+    edited_df = st.data_editor(df_display, num_rows="dynamic", use_container_width=True)
 
     # Export options
     df_export = pd.DataFrame(all_rows_export)
@@ -254,6 +266,16 @@ if uploaded_files:
         df_export.to_excel(writer, index=False)
 
     st.download_button("Download CSV", csv, "parsed_data.csv")
+    st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
+# Footer
+st.markdown("""
+<div class="footer">
+    <b>Developed by Jagamohan</b><br>
+    <i>Disclaimer: App is in developmental stage, validate before using the data.</i>
+</div>
+""", unsafe_allow_html=True)
+
 
 
 
