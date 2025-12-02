@@ -56,38 +56,56 @@ seriousness_map = {
     "otherMedicallyImportantCondition": "IME"
 }
 
-# UI
-st.title("👉 E2B XML Parser with Scrollable Table ✅")
-st.markdown("""
-### Instructions:
-1. Upload the E2B XML file.
-2. Upload the LLT-PT mapping Excel file.
-3. The output table will include:
-   - Patient details (only non-empty fields)
-   - Suspect company products with dosage and other details
-   - Event details with seriousness mapped to short labels
-4. Narrative will show first 10 words for display, full text in export.
-5. Scroll horizontally to view complete details.
-""")
-
-# Custom CSS for scrollable table
+# UI Styling
 st.markdown("""
 <style>
+body {
+    background-color: #f8f9fa;
+}
+h1 {
+    color: #2c3e50;
+}
 .table-container {
     overflow-x: auto;
     width: 100%;
+    margin-top: 20px;
 }
 table {
-    width: max-content;
     border-collapse: collapse;
+    width: max-content;
 }
-td, th {
-    white-space: nowrap;
+th {
+    background-color: #007bff;
+    color: white;
+    padding: 8px;
+}
+td {
     padding: 8px;
     border: 1px solid #ddd;
 }
+.maximize-btn {
+    background-color: #28a745;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    margin-bottom: 10px;
+}
 </style>
 """, unsafe_allow_html=True)
+
+# Title and Instructions
+st.title("📊 E2B XML Parser with Enhanced UI")
+st.markdown("""
+### ✅ Instructions:
+- Upload **E2B XML file** and **LLT-PT mapping Excel file**.
+- Toggle between **Single-line view** and **Multi-line view**.
+- Use **Maximize button** for full-screen table view.
+- Download options for CSV and Excel are available below.
+""")
+
+# Toggle for view mode
+view_mode = st.radio("Select Table View Mode:", ["Single-line (scroll)", "Multi-line (wrap)"])
 
 uploaded_file = st.file_uploader("Upload E2B XML file", type=["xml"])
 mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"])
@@ -249,8 +267,21 @@ if uploaded_file:
         'Tool Assessment': ''
     }])
 
+    # Apply view mode CSS
+    if view_mode == "Multi-line (wrap)":
+        st.markdown("""
+        <style>
+        td { white-space: normal !important; }
+        </style>
+        """, unsafe_allow_html=True)
+
     # Display scrollable table
     st.markdown('<div class="table-container">' + df_display.to_html(index=False, escape=False) + '</div>', unsafe_allow_html=True)
+
+    # Maximize button
+    if st.button("🔍 Maximize Table"):
+        st.markdown('<div style="width:100%;height:600px;overflow:auto;border:2px solid #007bff;">' +
+                    df_display.to_html(index=False, escape=False) + '</div>', unsafe_allow_html=True)
 
     # Export options
     csv = df_export.to_csv(index=False)
@@ -259,5 +290,6 @@ if uploaded_file:
         df_export.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
 
