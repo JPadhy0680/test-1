@@ -45,7 +45,7 @@ def map_outcome(code):
 
 # ---------------- Streamlit UI ---------------- #
 
-st.title("Enhanced E2B XML Parser - Individual Seriousness Criteria")
+st.title("Enhanced E2B XML Parser - Reaction-Based Seriousness Logic")
 
 uploaded_file = st.file_uploader("Upload E2B XML file", type=["xml"])
 
@@ -112,7 +112,7 @@ if uploaded_file:
     start_dates_combined = ', '.join(suspect_starts)
     stop_dates_combined = ', '.join(suspect_stops)
 
-    # Event Details with individual seriousness checks
+    # Event Details: reaction-based seriousness
     seriousness_criteria = [
         "resultsInDeath",
         "isLifeThreatening",
@@ -124,25 +124,23 @@ if uploaded_file:
 
     event_details_list = []
     event_count = 1
-    for reaction in root.findall('.//hl7:observation', ns):
-        code_elem = reaction.find('hl7:code', ns)
-        if code_elem is not None and code_elem.attrib.get('displayName') == 'reactionForTranslation':
-            value_elem = reaction.find('hl7:value', ns)
-            event_name = value_elem.text if value_elem is not None else ''
+    for reaction in root.findall('.//hl7:observation[hl7:code[@displayName="reaction"]]', ns):
+        value_elem = reaction.find('hl7:value', ns)
+        event_name = value_elem.text if value_elem is not None else ''
 
-            seriousness_flags = []
-            for criterion in seriousness_criteria:
-                rel_elem = reaction.find(f'.//hl7:code[@displayName="{criterion}"]/../hl7:value', ns)
-                if rel_elem is not None and rel_elem.attrib.get('value') == 'true':
-                    seriousness_flags.append(criterion)
+        seriousness_flags = []
+        for criterion in seriousness_criteria:
+            criterion_elem = reaction.find(f'.//hl7:code[@displayName="{criterion}"]/../hl7:value', ns)
+            if criterion_elem is not None and criterion_elem.attrib.get('value') == 'true':
+                seriousness_flags.append(criterion)
 
-            outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
-            outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
+        outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
+        outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
 
-            if event_name:
-                details = f"Event {event_count}: {event_name} (Seriousness: {', '.join(seriousness_flags)}; Outcome: {outcome})"
-                event_details_list.append(details)
-                event_count += 1
+        if event_name:
+            details = f"Event {event_count}: {event_name} (Seriousness: {', '.join(seriousness_flags)}; Outcome: {outcome})"
+            event_details_list.append(details)
+            event_count += 1
 
     event_details_combined = "\n".join(event_details_list)
 
@@ -179,5 +177,6 @@ if uploaded_file:
 
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
 
