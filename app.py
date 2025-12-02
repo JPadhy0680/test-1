@@ -57,7 +57,7 @@ seriousness_map = {
 }
 
 # UI
-st.title("👉 E2B XML Parser with Company Suspect Products ✅")
+st.title("👉 E2B XML Parser with Scrollable Table ✅")
 st.markdown("""
 ### Instructions:
 1. Upload the E2B XML file.
@@ -67,19 +67,24 @@ st.markdown("""
    - Suspect company products with dosage and other details
    - Event details with seriousness mapped to short labels
 4. Narrative will show first 10 words for display, full text in export.
-5. Download options for CSV and Excel are provided below.
+5. Scroll horizontally to view complete details.
 """)
 
-# Custom CSS for wider table and wrapping
+# Custom CSS for scrollable table
 st.markdown("""
 <style>
-table {
+.table-container {
+    overflow-x: auto;
     width: 100%;
-    table-layout: fixed;
 }
-td {
-    word-wrap: break-word;
-    white-space: normal;
+table {
+    width: max-content;
+    border-collapse: collapse;
+}
+td, th {
+    white-space: nowrap;
+    padding: 8px;
+    border: 1px solid #ddd;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -168,9 +173,9 @@ if uploaded_file:
                     parts.append(f"Stop Date: {stop_date}")
 
                 if parts:
-                    product_details_list.append(", ".join(parts))
+                    product_details_list.append(" | ".join(parts))
 
-    product_details_combined_html = "<br>".join(product_details_list)
+    product_details_combined_html = " || ".join(product_details_list)
     product_details_combined_excel = "\n".join(product_details_list)
 
     # Event Details
@@ -204,7 +209,7 @@ if uploaded_file:
             event_details_list.append(details)
             event_count += 1
 
-    event_details_combined_html = "<br>".join(event_details_list)
+    event_details_combined_html = " || ".join(event_details_list)
     event_details_combined_excel = "\n".join(event_details_list)
 
     # Narrative
@@ -244,8 +249,8 @@ if uploaded_file:
         'Tool Assessment': ''
     }])
 
-    # Display without index
-    st.markdown(df_display.to_html(index=False, escape=False), unsafe_allow_html=True)
+    # Display scrollable table
+    st.markdown('<div class="table-container">' + df_display.to_html(index=False, escape=False) + '</div>', unsafe_allow_html=True)
 
     # Export options
     csv = df_export.to_csv(index=False)
@@ -254,4 +259,5 @@ if uploaded_file:
         df_export.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
