@@ -29,7 +29,7 @@ body {
     width: 100%;
 }
 table {
-    white-space: nowrap;
+    white-space: pre-wrap; /* Allow multi-line cells */
     width: 100%;
 }
 .footer {
@@ -42,7 +42,7 @@ table {
 """, unsafe_allow_html=True)
 
 # ✅ Password Protection
-password = st.text_input("Enter Password to Access App:", type="password")
+password = st.text_input("Enter Password to Access App:", type="password", help="Enter the password to unlock the application.")
 if password != "7064242966":
     st.warning("Please enter the correct password to proceed.")
     st.stop()
@@ -51,26 +51,28 @@ if password != "7064242966":
 with st.expander("📖 Instructions"):
     st.markdown("""
     - Upload **multiple E2B XML files** and **LLT-PT mapping Excel file**.
-    - Combined data will be displayed in a scrollable window.
+    - Combined data will be displayed in the Export & Edit tab.
     - You can edit Listedness, Validity, and App Assessment directly in the table.
     - Download options for CSV and Excel are available below.
     """)
 
 # Tabs for navigation
-tab1, tab2 = st.tabs(["Upload & Parse", "Export & Settings"])
+tab1, tab2 = st.tabs(["Upload & Parse", "Export & Edit"])
+
+all_rows_display = []
+current_date = datetime.now().strftime("%d-%b-%Y")
 
 with tab1:
+    st.markdown("### 🔍 Upload Files")
     # Clear Inputs Button
-    if st.button("Clear Inputs"):
+    if st.button("Clear Inputs", help="Click to clear all uploaded files and reset the app."):
         st.session_state.clear()
         st.experimental_rerun()
 
-    # File Uploads
-    uploaded_files = st.file_uploader("Upload E2B XML files", type=["xml"], accept_multiple_files=True)
-    mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"])
+    # File Uploads with tooltips
+    uploaded_files = st.file_uploader("Upload E2B XML files", type=["xml"], accept_multiple_files=True, help="Upload one or more E2B XML files for parsing.")
+    mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"], help="Upload the MedDRA LLT-PT mapping Excel file.")
 
-    all_rows_display = []
-    current_date = datetime.now().strftime("%d-%b-%Y")
     mapping_df = pd.read_excel(mapping_file) if mapping_file else None
 
     # Helper Functions
@@ -123,6 +125,7 @@ with tab1:
     }
 
     if uploaded_files:
+        st.markdown("### ⏳ Parsing Files...")
         progress = st.progress(0)
         for idx, uploaded_file in enumerate(uploaded_files, start=1):
             tree = ET.parse(uploaded_file)
@@ -243,7 +246,9 @@ with tab1:
 
             progress.progress(idx / len(uploaded_files))
 
-        # Editable Table (only last 3 columns editable)
+with tab2:
+    st.markdown("### 📋 Parsed Data Table")
+    if all_rows_display:
         df_display = pd.DataFrame(all_rows_display)
         editable_cols = ['Listedness', 'Validity', 'App Assessment']
         disabled_cols = [col for col in df_display.columns if col not in editable_cols]
@@ -257,9 +262,8 @@ with tab1:
 
         st.download_button("⬇️ Download CSV", csv, "parsed_data.csv")
         st.download_button("⬇️ Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
-
-with tab2:
-    st.markdown("### Settings and Additional Features Coming Soon!")
+    else:
+        st.info("No data available yet. Please upload files in the first tab.")
 
 # Footer
 st.markdown("""
@@ -268,6 +272,7 @@ st.markdown("""
     <i>Disclaimer: App is in developmental stage, validate before using the data.</i>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
