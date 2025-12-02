@@ -38,8 +38,16 @@ def map_outcome(code):
     }
     return mapping.get(code, "Unknown")
 
+# Company product list
+company_products = [
+    "abiraterone", "apixaban", "apremilast", "bexarotene", "clobazam", "clonazepam",
+    "dabigatran", "dapagliflozin", "dimethyl fumarate", "famotidine", "fesoterodine",
+    "icatibant", "linagliptin", "pirfenidone", "ranolazine", "rivaroxaban", "saxagliptin",
+    "sitagliptin", "solifenacin + tamsulosin", "tapentadol", "ticagrelor", "nintedanib"
+]
+
 # UI
-st.title("👉 E2B XML Parser with Dynamic Details ✅")
+st.title("👉 E2B XML Parser with Company Suspect Products ✅")
 
 uploaded_file = st.file_uploader("Upload E2B XML file", type=["xml"])
 mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"])
@@ -89,42 +97,43 @@ if uploaded_file:
             if subj_id_elem is not None:
                 suspect_ids.append(subj_id_elem.attrib.get('root', ''))
 
-    # Dynamic Product Detail for suspect drugs
+    # Dynamic Product Detail for suspect drugs & company products
     product_details_list = []
     for drug in root.findall('.//hl7:substanceAdministration', ns):
         id_elem = drug.find('.//hl7:id', ns)
         drug_id = id_elem.attrib.get('root', '') if id_elem is not None else ''
         if drug_id in suspect_ids:
-            parts = []
             name_elem = drug.find('.//hl7:kindOfProduct/hl7:name', ns)
-            if name_elem is not None and name_elem.text:
-                parts.append(f"Drug: {name_elem.text}")
-            text_elem = drug.find('.//hl7:text', ns)
-            if text_elem is not None and text_elem.text:
-                parts.append(f"Dosage: {text_elem.text}")
-            dose_elem = drug.find('.//hl7:doseQuantity', ns)
-            if dose_elem is not None:
-                dose_val = dose_elem.attrib.get('value', '')
-                dose_unit = dose_elem.attrib.get('unit', '')
-                if dose_val or dose_unit:
-                    parts.append(f"Dose: {dose_val} {dose_unit}")
-            form_elem = drug.find('.//hl7:formCode/hl7:originalText', ns)
-            if form_elem is not None and form_elem.text:
-                parts.append(f"Formulation: {form_elem.text}")
-            lot_elem = drug.find('.//hl7:lotNumberText', ns)
-            if lot_elem is not None and lot_elem.text:
-                parts.append(f"Lot No: {lot_elem.text}")
-            start_elem = drug.find('.//hl7:low', ns)
-            start_date = format_date(start_elem.attrib.get('value', '') if start_elem is not None else '')
-            if start_date:
-                parts.append(f"Start Date: {start_date}")
-            stop_elem = drug.find('.//hl7:high', ns)
-            stop_date = format_date(stop_elem.attrib.get('value', '') if stop_elem is not None else '')
-            if stop_date:
-                parts.append(f"Stop Date: {stop_date}")
+            drug_name = name_elem.text.lower() if name_elem is not None and name_elem.text else ''
+            if drug_name in company_products:  # Only company products
+                parts = []
+                if drug_name: parts.append(f"Drug: {name_elem.text}")
+                text_elem = drug.find('.//hl7:text', ns)
+                if text_elem is not None and text_elem.text:
+                    parts.append(f"Dosage: {text_elem.text}")
+                dose_elem = drug.find('.//hl7:doseQuantity', ns)
+                if dose_elem is not None:
+                    dose_val = dose_elem.attrib.get('value', '')
+                    dose_unit = dose_elem.attrib.get('unit', '')
+                    if dose_val or dose_unit:
+                        parts.append(f"Dose: {dose_val} {dose_unit}")
+                form_elem = drug.find('.//hl7:formCode/hl7:originalText', ns)
+                if form_elem is not None and form_elem.text:
+                    parts.append(f"Formulation: {form_elem.text}")
+                lot_elem = drug.find('.//hl7:lotNumberText', ns)
+                if lot_elem is not None and lot_elem.text:
+                    parts.append(f"Lot No: {lot_elem.text}")
+                start_elem = drug.find('.//hl7:low', ns)
+                start_date = format_date(start_elem.attrib.get('value', '') if start_elem is not None else '')
+                if start_date:
+                    parts.append(f"Start Date: {start_date}")
+                stop_elem = drug.find('.//hl7:high', ns)
+                stop_date = format_date(stop_elem.attrib.get('value', '') if stop_elem is not None else '')
+                if stop_date:
+                    parts.append(f"Stop Date: {stop_date}")
 
-            if parts:
-                product_details_list.append(", ".join(parts))
+                if parts:
+                    product_details_list.append(", ".join(parts))
 
     product_details_combined = "\n".join(product_details_list)
 
@@ -196,6 +205,7 @@ if uploaded_file:
         df.to_excel(writer, index=False)
     st.download_button("Download CSV", csv, "parsed_data.csv")
     st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
 
 
