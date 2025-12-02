@@ -5,6 +5,32 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 import io
 
+# Configure page layout
+st.set_page_config(layout="wide")
+
+# Custom CSS for layout optimization
+st.markdown("""
+<style>
+.block-container {
+    padding-top: 1rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+}
+.scroll-container {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 500px;
+    border: 1px solid #ddd;
+    padding: 10px;
+    width: 100%;
+}
+table {
+    white-space: nowrap;
+    width: 100%;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Helper Functions
 def format_date(date_str):
     if not date_str or len(date_str) < 8:
@@ -218,21 +244,6 @@ if uploaded_files:
 
     # Display combined table with scroll and single-line
     df_display = pd.DataFrame(all_rows_display)
-    st.markdown("""
-    <style>
-    .scroll-container {
-        overflow-x: auto;
-        overflow-y: auto;
-        max-height: 400px;
-        border: 1px solid #ddd;
-        padding: 10px;
-    }
-    table {
-        white-space: nowrap;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
     st.markdown(f'<div class="scroll-container">{df_display.to_html(index=False, escape=False)}</div>', unsafe_allow_html=True)
 
     # Export options
@@ -243,6 +254,6 @@ if uploaded_files:
         df_export.to_excel(writer, index=False)
 
     st.download_button("Download CSV", csv, "parsed_data.csv")
-    st.download_button("Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
 
 
