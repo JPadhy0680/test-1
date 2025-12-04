@@ -110,7 +110,7 @@ with tab1:
 
     def contains_company_product(text: str, company_products: list) -> str:
         """
-        Returns the matched company product (canonical molecule name) if any is present
+        Returns the matched company product (canonical molecule/brand name) if any is present
         in the given text; otherwise returns ''.
         Uses word-boundary regex over normalized text.
         """
@@ -124,15 +124,32 @@ with tab1:
                 return prod  # return canonical prod key
         return ""
 
-    # Company products (filter suspects)
+    # Company products (filter suspects) — includes Category 2 + others
     company_products = [
+        # Category 1 (rest — keep your original portfolio)
         "abiraterone", "apixaban", "apremilast", "bexarotene",
-        "clobazam", "clonazepam", "dabigatran", "dapagliflozin",
-        "dimethyl fumarate", "famotidine", "fesoterodine",
-        "icatibant", "linagliptin", "pirfenidone", "ranolazine",
-        "rivaroxaban", "saxagliptin", "sitagliptin", "solifenacin",
-        "tamsulosin", "tapentadol", "ticagrelor", "nintedanib"
+        # "clobazam", "clonazepam" -> Category 2 (listed separately below)
+        "dabigatran", "dapagliflozin",
+        "dimethyl fumarate", "icatibant", "linagliptin",
+        "pirfenidone", "ranolazine", "rivaroxaban", "saxagliptin",
+        "sitagliptin", "solifenacin", "tamsulosin", "tapentadol",
+        "ticagrelor", "nintedanib",
+        # Additions requested previously (some are Category 2)
+        "famotidine", "cyclogest", "progesterone", "luteum", "amelgen",
+        # Newly added requested items
+        "cyanocobalamin", "itraconazole",
+        # Also ensure "clobazam" and "clonazepam" are in products list for matching
+        "clobazam", "clonazepam"
     ]
+
+    # Define Category 2 products explicitly
+    category2_products = {
+        "clobazam", "clonazepam", "cyanocobalamin",
+        "famotidine", "itraconazole",
+        "tamsulosin", "solifenacin",
+        "tapentadol", "cyclogest",
+        "progesterone", "luteum", "amelgen"
+    }
 
     seriousness_map = {
         "resultsInDeath": "Death",
@@ -195,7 +212,7 @@ with tab1:
             height_elem = root.find('.//hl7:code[@displayName="height"]/../hl7:value', ns)
             height = f"{height_elem.attrib.get('value', '')} {height_elem.attrib.get('unit', '')}" if height_elem is not None else ''
 
-            # --- NEW: Patient initials extraction ---
+            # --- Patient initials extraction ---
             patient_initials = ""
             name_elem = root.find('.//hl7:player1/hl7:name', ns)
             if name_elem is not None:
@@ -215,7 +232,7 @@ with tab1:
                         if name_elem.text and name_elem.text.strip():
                             patient_initials = name_elem.text.strip()
 
-            # --- NEW: Age Group extraction ---
+            # --- Age Group extraction ---
             age_group_map = {
                 "0": "Foetus",
                 "1": "Neonate (Preterm and Term newborns)",
@@ -263,6 +280,7 @@ with tab1:
 
             # Product details (only company products, suspect only)
             product_details_list = []
+            case_has_category2 = False  # flag for reportability
             for drug in root.findall('.//hl7:substanceAdministration', ns):
                 id_elem = drug.find('.//hl7:id', ns)
                 drug_id = id_elem.attrib.get('root', '') if id_elem is not None else ''
@@ -292,6 +310,10 @@ with tab1:
                     matched_company_prod = contains_company_product(raw_drug_text, company_products)
 
                     if matched_company_prod:
+                        # Track Category 2 presence for reportability
+                        if normalize_text(matched_company_prod) in category2_products:
+                            case_has_category2 = True
+
                         parts = []
                         display_name = raw_drug_text if raw_drug_text else matched_company_prod.title()
                         parts.append(f"Drug: {display_name}")
@@ -334,6 +356,8 @@ with tab1:
             seriousness_criteria = list(seriousness_map.keys())
             event_details_list = []
             event_count = 1
+            case_has_serious_event = False  # flag for reportability
+
             for reaction in root.findall('.//hl7:observation', ns):
                 code_elem = reaction.find('hl7:code', ns)
                 if code_elem is not None and code_elem.attrib.get('displayName') == 'reaction':
@@ -350,27 +374,45 @@ with tab1:
                         except Exception:
                             pass
 
+                    # Collect seriousness flags
                     seriousness_flags = []
                     for criterion in seriousness_criteria:
                         criterion_elem = reaction.find(f'.//hl7:code[@displayName="{criterion}"]/../hl7:value', ns)
                         if criterion_elem is not None and criterion_elem.attrib.get('value') == 'true':
                             seriousness_flags.append(seriousness_map.get(criterion, criterion))
 
+                    # ✅ Default to "Non-serious" if no criteria present
+                    if not seriousness_flags:
+                        seriousness_display = "Non-serious"
+                    else:
+                        seriousness_display = ", ".join(seriousness_flags)
+                        case_has_serious_event = True  # mark case as having serious event
+
+                    # Outcome
                     outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
                     outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
 
-                    details = f"Event {event_count}: {llt_term} ({pt_term}) (Seriousness: {', '.join(seriousness_flags)}; Outcome: {outcome})"
+                    details = (
+                        f"Event {event_count}: {llt_term} ({pt_term}) "
+                        f"(Seriousness: {seriousness_display}; Outcome: {outcome})"
+                    )
                     event_details_list.append(details)
                     event_count += 1
 
             event_details_combined_display = "\n".join(event_details_list)
+
+            # --- NEW: Reportability calculation ---
+            if case_has_serious_event and case_has_category2:
+                reportability = "Category 2, serious, reportable case"
+            else:
+                reportability = "Non-Reportable"
 
             # Narrative
             narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
             narrative_full = narrative_elem.text if narrative_elem is not None else ''
             narrative_display = " ".join(narrative_full.split()[:10]) + "..." if len(narrative_full.split()) > 10 else narrative_full
 
-            # Collect row
+            # Collect row (include Reportability)
             all_rows_display.append({
                 'SL No': idx,
                 'Date': current_date,
@@ -381,6 +423,7 @@ with tab1:
                 'Product Detail': product_details_combined,
                 'Event Details': event_details_combined_display,
                 'Narrative': narrative_display,
+                'Reportability': reportability,          # ✅ New column
                 'Listedness': '',
                 'Validity': '',
                 'App Assessment': ''
@@ -393,6 +436,7 @@ with tab2:
     if all_rows_display:
         df_display = pd.DataFrame(all_rows_display)
 
+        # Keep only specific columns editable; Reportability is computed -> disabled
         editable_cols = ['Listedness', 'Validity', 'App Assessment']
         disabled_cols = [col for col in df_display.columns if col not in editable_cols]
 
@@ -411,6 +455,7 @@ with tab2:
             "Total Cases": len(edited_df),
             "Reporter Qualification Counts": edited_df['Reporter Qualification'].value_counts().to_dict(),
             "Gender Counts": gender_counts
+            # (Optionally add Reportability counts here)
         }
 
         summary_df = pd.DataFrame(list(summary_data.items()), columns=["Metric", "Value"])
@@ -452,5 +497,6 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
