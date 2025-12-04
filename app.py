@@ -349,7 +349,7 @@ with tab1:
             name_elem = root.find('.//hl7:player1/hl7:name', ns)
             if name_elem is not None:
                 if 'nullFlavor' in name_elem.attrib and name_elem.attrib.get('nullFlavor') == 'MSK':
-                    patient_initials = "[Masked]"
+                    patient_initials = "Masked"
                 else:
                     init_parts = []
                     for g in name_elem.findall('hl7:given', ns):
@@ -367,7 +367,7 @@ with tab1:
             # Age group
             age_group_map = {
                 "0": "Foetus",
-                "1": "Neonate (Preterm and Term newborns)",
+                "1": "Neonate",
                 "2": "Infant",
                 "3": "Child",
                 "4": "Adolescent",
