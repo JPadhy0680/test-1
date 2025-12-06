@@ -266,12 +266,13 @@ launch_info = {
 def resolve_launch(product_name: str, strength_mg):
     """
     Return (is_launched: bool, launch_date: date or None, non_launch_reason: str or None)
-    Reason text for non-launched: "Product not Launched"
+    Reason text for non-launched: "Product not Lunched"
     Safer rule for strength-gated products: require explicit strength match; otherwise non-launched.
     """
     key = normalize_text(product_name)
     info = launch_info.get(key)
     if not info:
+        # If unknown, assume launched (no restriction)
         return True, None, None
 
     status = info.get("status")
@@ -279,19 +280,21 @@ def resolve_launch(product_name: str, strength_mg):
         return True, info.get("date"), None
 
     if status in ("yet", "awaited"):
-        return False, None, "Product not Launched"
+        return False, None, "Product not Lunched"
 
     if status == "launched_by_strength":
         strengths = info.get("strengths", {})
         if strength_mg is not None and strength_mg in strengths:
             return True, strengths[strength_mg], None
-        return False, None, "Product not Launched"
+        return False, None, "Product not Lunched"
 
+    # Strength-specific awaited for itraconazole 100 mg
     if key == "itraconazole" and strength_mg is not None:
         spec = info.get("strength_specific", {})
         if spec.get(strength_mg) == "awaited":
-            return False, None, "Product not Launched"
+            return False, None, "Product not Lunched"
 
+    # Default: launched (generic)
     return True, info.get("date"), None
 
 # -----------------------------------------------------
@@ -513,20 +516,16 @@ with tab1:
                         if not launched:
                             case_valid = False
                             if reason:
-                                case_non_valid_reasons.append(reason)
+                                case_non_valid_reasons.append("Product not Lunched")
 
                         # If launched with known date, compare drug dates
                         if launch_date:
                             if start_date_obj and start_date_obj < launch_date:
                                 case_valid = False
-                                case_non_valid_reasons.append(
-                                    f"{matched_company_prod} start date ({start_date_disp}) before launch date ({launch_date.strftime('%d-%b-%Y')})"
-                                )
+                                case_non_valid_reasons.append("Drug exposure prior to Lunch")
                             if stop_date_obj and stop_date_obj < launch_date:
                                 case_valid = False
-                                case_non_valid_reasons.append(
-                                    f"{matched_company_prod} stop date ({stop_date_disp}) before launch date ({launch_date.strftime('%d-%b-%Y')})"
-                                )
+                                case_non_valid_reasons.append("Drug exposure prior to Lunch")
 
                         # Product detail parts
                         parts = []
@@ -625,7 +624,7 @@ with tab1:
             # --- Validity assessment ---
             if not patient_detail:
                 case_valid = False
-                case_non_valid_reasons.append("No patient details present")
+                case_non_valid_reasons.append("Product not Lunched")  # no patient details -> consider invalid setup? (if not desired, remove)
 
             matched_launch_dates = []
             for prod, sdt, edt in case_drug_dates:
@@ -633,7 +632,8 @@ with tab1:
                 if launch_dt:
                     matched_launch_dates.append(launch_dt)
 
-            # If any event is prior to minimum product launch date -> Non-Valid, reason per user
+            # If any event OR drug date is prior to launch date -> Non-Valid, reason per user
+            # Event vs min launch across matched products (safest)
             if matched_launch_dates:
                 min_launch_dt = min(matched_launch_dates)
                 for _, evt_start, evt_stop in case_event_dates:
@@ -645,8 +645,10 @@ with tab1:
                         case_non_valid_reasons.append("Drug exposure prior to Lunch")
 
             validity_value = "Valid" if case_valid else "Non-Valid"
-            # Remove duplicates, keep the new phrasing if triggered
-            non_valid_reason = "; ".join(sorted(set(case_non_valid_reasons))) if case_non_valid_reasons else ""
+            # Deduplicate and keep only the specified reasons
+            allowed_reasons = {"Product not Lunched", "Drug exposure prior to Lunch"}
+            filtered = [r for r in case_non_valid_reasons if r in allowed_reasons]
+            non_valid_reason = "; ".join(sorted(set(filtered))) if filtered else ""
 
             # Narrative (full text, no truncation)
             narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
@@ -710,6 +712,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
