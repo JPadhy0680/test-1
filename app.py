@@ -6,16 +6,23 @@ from datetime import datetime, timedelta
 import io
 import re
 
-# ----------------------------
+# -----------------------------------------------------
 # App configuration
-# ----------------------------
+# -----------------------------------------------------
 st.set_page_config(page_title="E2B_R3 XML Parser Application", layout="wide")
 st.markdown(""" """, unsafe_allow_html=True)
 st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 
-# ----------------------------
-# Password with 24h persistence
-# ----------------------------
+# -----------------------------------------------------
+# Password with 24h persistence (uses st.secrets if present)
+# -----------------------------------------------------
+def _get_password():
+    DEFAULT_PASSWORD = "7064242966"
+    try:
+        return st.secrets["auth"]["password"]
+    except Exception:
+        return DEFAULT_PASSWORD
+
 def is_authenticated() -> bool:
     exp = st.session_state.get("auth_expires", None)
     if exp and datetime.now() < exp:
@@ -23,8 +30,12 @@ def is_authenticated() -> bool:
     return False
 
 if not is_authenticated():
-    password = st.text_input("Enter Password to Access App:", type="password", help="Enter the password to unlock the application.")
-    if password == "7064242966":
+    password = st.text_input(
+        "Enter Password to Access App:",
+        type="password",
+        help="Enter the password to unlock the application."
+    )
+    if password == _get_password():
         st.session_state["auth_expires"] = datetime.now() + timedelta(hours=24)
         st.success("Access granted for 24 hours.")
     else:
@@ -32,9 +43,9 @@ if not is_authenticated():
             st.warning("Please enter the correct password to proceed.")
         st.stop()
 
-# ----------------------------
+# -----------------------------------------------------
 # Instructions
-# ----------------------------
+# -----------------------------------------------------
 with st.expander("📖 Instructions"):
     st.markdown("""
 - Upload **multiple E2B XML files** and **LLT-PT mapping Excel file**.
@@ -44,18 +55,16 @@ with st.expander("📖 Instructions"):
 - Only **one Excel** download button is provided (no CSV/HTML/Summary).
 """)
 
-# ----------------------------
+# -----------------------------------------------------
 # Tabs
-# ----------------------------
+# -----------------------------------------------------
 tab1, tab2 = st.tabs(["Upload & Parse", "Export & Edit"])
-
 all_rows_display = []
 current_date = datetime.now().strftime("%d-%b-%Y")
 
-# ----------------------------
+# -----------------------------------------------------
 # Helper mappings & functions
-# ----------------------------
-
+# -----------------------------------------------------
 def format_date(date_str: str) -> str:
     """Return DD-Mon-YYYY from HL7 date string (YYYYMMDD...) or empty if invalid."""
     if not date_str or len(date_str) < 8:
@@ -117,28 +126,34 @@ def contains_company_product(text: str, company_products: list) -> str:
             return prod
     return ""
 
+# Robust strength (mg) extraction: supports "1,000 mg", "2.5 mg", case-insensitive
+MG_PATTERN = re.compile(r"""
+    (\d{1,3}(?:,\d{3})*|\d+(?:\.\d{1,3})?)   # numeric value, supports thousands and decimals
+    \s*
+    mg\b                                     # mg unit, word boundary
+""", re.IGNORECASE | re.VERBOSE)
+
 def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
     """Try to extract strength in mg from raw text or doseQuantity."""
     # Priority 1: doseQuantity unit mg
     if dose_val and dose_unit and dose_unit.lower() == "mg":
         try:
-            return float(dose_val)
+            return float(str(dose_val).replace(",", ""))
         except Exception:
             pass
     # Priority 2: regex in raw text
     if raw_text:
-        m = re.search(r'(\d+(?:\.\d+)?)\s*mg', raw_text.lower())
+        m = MG_PATTERN.search(raw_text or "")
         if m:
             try:
-                return float(m.group(1))
+                return float(m.group(1).replace(",", ""))
             except Exception:
                 pass
     return None
 
-# ----------------------------
+# -----------------------------------------------------
 # Product portfolio & launch info
-# ----------------------------
-
+# -----------------------------------------------------
 # Company portfolio (for matching)
 company_products = [
     # Category 1 + 2 combined (for detection)
@@ -163,8 +178,6 @@ category2_products = {
 }
 
 # Launch info mapping
-# - date strings parsed to datetime.date
-# - status in {"launched", "yet", "awaited"}
 def parse_dd_mmm_yy(s):
     return datetime.strptime(s, "%d-%b-%y").date()
 
@@ -209,8 +222,8 @@ launch_info = {
     "solifenacin": {"status": "launched", "date": parse_dd_mmm_yy("08-May-23")},
     "tapentadol": {"status": "launched", "date": parse_dd_mmm_yy("01-Feb-24")},
     "ticagrelor": {"status": "yet", "date": None},
-    # Brands of progesterone
-    "cyclogest": {"status": "launched", "date": None},   # If exact date needed, supply; None means treat as launched w/o date checks
+    # Brands of progesterone (treat as launched without specific dates)
+    "cyclogest": {"status": "launched", "date": None},
     "progesterone": {"status": "launched", "date": None},
     "luteum": {"status": "launched", "date": None},
     "amelgen": {"status": "launched", "date": None},
@@ -219,8 +232,8 @@ launch_info = {
 def resolve_launch(product_name: str, strength_mg):
     """
     Return (is_launched: bool, launch_date: date or None, non_launch_reason: str or None)
-    Reason text for non-launched: "Product not Lunched"
-    For strength-based products, if strength is missing, use the earliest launch among strengths.
+    Reason text for non-launched: "Product not Launched"
+    Safer rule for strength-gated products: require explicit strength match; otherwise non-launched.
     """
     key = normalize_text(product_name)
     info = launch_info.get(key)
@@ -233,43 +246,29 @@ def resolve_launch(product_name: str, strength_mg):
         return True, info.get("date"), None
 
     if status in ("yet", "awaited"):
-        return False, None, "Product not Lunched"
+        return False, None, "Product not Launched"
 
     if status == "launched_by_strength":
         strengths = info.get("strengths", {})
-        if strength_mg is not None:
-            # Exact strength match or closest?
-            if strength_mg in strengths:
-                return True, strengths[strength_mg], None
-            else:
-                # If strength not mapped, take earliest launch date among known strengths (safest check)
-                if strengths:
-                    earliest = min(strengths.values())
-                    return True, earliest, None
-                return True, None, None
-        else:
-            # No strength available -> earliest launch date
-            if strengths:
-                earliest = min(strengths.values())
-                return True, earliest, None
-            return True, None, None
+        # must match explicitly
+        if strength_mg is not None and strength_mg in strengths:
+            return True, strengths[strength_mg], None
+        return False, None, "Product not Launched"
 
     # Strength-specific awaited for itraconazole 100 mg
     if key == "itraconazole" and strength_mg is not None:
         spec = info.get("strength_specific", {})
         if spec.get(strength_mg) == "awaited":
-            return False, None, "Product not Lunched"
-        # Otherwise treat as overall awaited (unknown) -> non launched
-        return False, None, "Product not Lunched"
+            return False, None, "Product not Launched"
 
-    # Default: launched
+    # Default: launched (generic)
     return True, info.get("date"), None
 
-# ----------------------------
+# -----------------------------------------------------
 # Upload & Parse tab
-# ----------------------------
+# -----------------------------------------------------
 with tab1:
-    st.markdown("### 🔍 Upload Files 🗂️")
+    st.markdown("### 🔎 Upload Files 🗂️")
     if st.button("Clear Inputs", help="Click to clear all uploaded files and reset the app."):
         st.session_state.clear()
         st.experimental_rerun()
@@ -280,14 +279,18 @@ with tab1:
         accept_multiple_files=True,
         help="Upload one or more E2B XML files for parsing."
     )
-
     mapping_file = st.file_uploader(
         "Upload LLT-PT Mapping Excel file",
         type=["xlsx"],
         help="Upload the MedDRA LLT-PT mapping Excel file."
     )
 
-    mapping_df = pd.read_excel(mapping_file, engine="openpyxl") if mapping_file else None
+    mapping_df = None
+    if mapping_file:
+        mapping_df = pd.read_excel(mapping_file, engine="openpyxl")
+        # normalize LLT Code to string for robust matching
+        if "LLT Code" in mapping_df.columns:
+            mapping_df["LLT Code"] = mapping_df["LLT Code"].astype(str).str.strip()
 
     seriousness_map = {
         "resultsInDeath": "Death",
@@ -301,10 +304,19 @@ with tab1:
     if uploaded_files:
         st.markdown("### ⏳ Parsing Files...")
         progress = st.progress(0)
+        total_files = len(uploaded_files)
+        parsed_rows = 0
 
         for idx, uploaded_file in enumerate(uploaded_files, start=1):
-            tree = ET.parse(uploaded_file)
-            root = tree.getroot()
+            warnings = []  # per-file warnings
+            try:
+                tree = ET.parse(uploaded_file)
+                root = tree.getroot()
+            except Exception as e:
+                st.error(f"Failed to parse XML file {getattr(uploaded_file, 'name', '(unnamed)')}: {e}")
+                progress.progress(idx / total_files)
+                continue
+
             ns = {'hl7': 'urn:hl7-org:v3'}
 
             # Sender & Transmission
@@ -340,7 +352,6 @@ with tab1:
 
             weight_elem = root.find('.//hl7:code[@displayName="bodyWeight"]/../hl7:value', ns)
             weight = f"{weight_elem.attrib.get('value', '')} {weight_elem.attrib.get('unit', '')}" if weight_elem is not None else ''
-
             height_elem = root.find('.//hl7:code[@displayName="height"]/../hl7:value', ns)
             height = f"{height_elem.attrib.get('value', '')} {height_elem.attrib.get('unit', '')}" if height_elem is not None else ''
 
@@ -412,19 +423,20 @@ with tab1:
             # Product/detail build and launch/validity checks
             product_details_list = []
             case_has_category2 = False
+
             # For validity
             case_non_valid_reasons = []
             case_valid = True
+
             # Collect all relevant dates to compare with launch
             case_drug_dates = []   # tuples (product_key, start_date, stop_date)
-            case_event_dates = []  # tuples (product_key, event_start, event_stop)
+            case_event_dates = []  # tuples ("event", event_start, event_stop)
 
             for drug in root.findall('.//hl7:substanceAdministration', ns):
                 id_elem = drug.find('.//hl7:id', ns)
                 drug_id = id_elem.attrib.get('root', '') if id_elem is not None else ''
                 if drug_id in suspect_ids:
                     name_elem_drug = drug.find('.//hl7:kindOfProduct/hl7:name', ns)
-
                     # Collect a friendly display name
                     raw_drug_text = ""
                     if name_elem_drug is not None:
@@ -443,6 +455,7 @@ with tab1:
                             raw_drug_text = alt_name.text.strip()
 
                     matched_company_prod = contains_company_product(raw_drug_text, company_products)
+
                     if matched_company_prod:
                         # Category 2 flag
                         if normalize_text(matched_company_prod) in category2_products:
@@ -498,14 +511,12 @@ with tab1:
                             parts.append(f"Start Date: {start_date_disp}")
                         if stop_date_disp:
                             parts.append(f"Stop Date: {stop_date_disp}")
-
                         form_elem = drug.find('.//hl7:formCode/hl7:originalText', ns)
                         if form_elem is not None and form_elem.text:
                             parts.append(f"Formulation: {form_elem.text}")
                         lot_elem = drug.find('.//hl7:lotNumberText', ns)
                         if lot_elem is not None and lot_elem.text:
                             parts.append(f"Lot No: {lot_elem.text}")
-
                         if parts:
                             product_details_list.append(" \n ".join(parts))
 
@@ -521,14 +532,18 @@ with tab1:
                     value_elem = reaction.find('hl7:value', ns)
                     llt_code = value_elem.attrib.get('code', '') if value_elem is not None else ''
                     llt_term, pt_term = llt_code, ''
+
                     if mapping_df is not None and llt_code:
                         try:
-                            row = mapping_df[mapping_df['LLT Code'] == int(llt_code)]
+                            llt_code_str = str(llt_code).strip()
+                            row = mapping_df[mapping_df['LLT Code'] == llt_code_str]
                             if not row.empty:
-                                llt_term = row['LLT Term'].values[0]
-                                pt_term = row['PT Term'].values[0]
-                        except Exception:
-                            pass
+                                llt_term = str(row['LLT Term'].values[0])
+                                pt_term = str(row['PT Term'].values[0])
+                            else:
+                                warnings.append(f"LLT code {llt_code_str} not found in mapping file")
+                        except Exception as e:
+                            warnings.append(f"LLT mapping failed for code {llt_code}: {e}")
 
                     # Seriousness
                     seriousness_flags = []
@@ -536,7 +551,6 @@ with tab1:
                         criterion_elem = reaction.find(f'.//hl7:code[@displayName="{criterion}"]/../hl7:value', ns)
                         if criterion_elem is not None and criterion_elem.attrib.get('value') == 'true':
                             seriousness_flags.append(seriousness_map.get(criterion, criterion))
-
                     if not seriousness_flags:
                         seriousness_display = "Non-serious"
                     else:
@@ -558,12 +572,15 @@ with tab1:
                     evt_high_obj = parse_date_obj(evt_high_str)
                     case_event_dates.append(("event", evt_low_obj, evt_high_obj))
 
-                    details_parts = [f"Event {event_count}: {llt_term} ({pt_term})", f"Seriousness: {seriousness_display}", f"Outcome: {outcome}"]
+                    details_parts = [
+                        f"Event {event_count}: {llt_term} ({pt_term})",
+                        f"Seriousness: {seriousness_display}",
+                        f"Outcome: {outcome}"
+                    ]
                     if evt_low_disp:
                         details_parts.append(f"Event Start: {evt_low_disp}")
                     if evt_high_disp:
                         details_parts.append(f"Event End: {evt_high_disp}")
-
                     event_details_list.append(" (" + "; ".join(details_parts[1:]) + ") " + details_parts[0])
                     event_count += 1
 
@@ -577,21 +594,18 @@ with tab1:
 
             # --- Validity assessment ---
             # Rule: Non-valid if
-            #  - no patient details
-            #  - any drug start/stop OR event start/stop date < product launch date
-            #  - product not launched (reason: "Product not Lunched")
+            # - no patient details
+            # - any drug start/stop OR event start/stop date < product launch date
+            # - product not launched (reason: "Product not Launched")
             if not patient_detail:
                 case_valid = False
                 case_non_valid_reasons.append("No patient details present")
 
             # Compare event dates against all known launch dates of matched products
-            # If any launch date exists and any event date is before, mark non-valid
             # We use minimum launch date among matched products (safest) if multiple.
             matched_launch_dates = []
-            # Re-evaluate from product_details_list: we already appended reasons above while parsing drugs
-            # To compute matched launch dates: check products we added in case_drug_dates
             for prod, sdt, edt in case_drug_dates:
-                launched, launch_dt, reason = resolve_launch(prod, None)  # strength already handled earlier
+                launched, launch_dt, _ = resolve_launch(prod, None)  # strength already handled earlier per-drug
                 if launch_dt:
                     matched_launch_dates.append(launch_dt)
 
@@ -626,24 +640,31 @@ with tab1:
                 'Patient Detail': patient_detail,
                 'Product Detail': " \n ".join(product_details_list),
                 'Event Details': event_details_combined_display,
-                'Narrative': narrative_full,                   # ✅ full narrative
-                'Reportability': reportability,                # computed
-                'Validity': validity_value,                    # computed
-                'Non-Valid Reason': non_valid_reason,          # computed
-                'Listedness': '',                              # editable
-                'App Assessment': ''                           # editable
+                'Narrative': narrative_full,  # ✅ full narrative
+                'Reportability': reportability,  # computed
+                'Validity': validity_value,      # computed
+                'Non-Valid Reason': non_valid_reason,  # computed
+                'Listedness': '',               # editable
+                'App Assessment': '',           # editable
+                'Parsing Warnings': "; ".join(warnings) if warnings else ""
             })
+            parsed_rows += 1
+            progress.progress(idx / total_files)
 
-            progress.progress(idx / len(uploaded_files))
+        st.success(f"Parsing complete ✅ — Files processed: {total_files}, Rows created: {parsed_rows}")
 
-# ----------------------------
+# -----------------------------------------------------
 # Export & Edit tab
-# ----------------------------
+# -----------------------------------------------------
 with tab2:
     st.markdown("### 📋 Parsed Data Table 🧾")
-
     if all_rows_display:
         df_display = pd.DataFrame(all_rows_display)
+
+        # Optional narrative truncation for table UX
+        show_full_narrative = st.checkbox("Show full narrative (may be long)", value=True)
+        if not show_full_narrative:
+            df_display['Narrative'] = df_display['Narrative'].astype(str).str.slice(0, 1000)
 
         # Only these columns editable; computed columns locked
         editable_cols = ['Listedness', 'App Assessment']
@@ -660,8 +681,8 @@ with tab2:
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
             edited_df.to_excel(writer, index=False, sheet_name="Parsed Data")
-        st.download_button("⬇️ Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
 
+        st.download_button("⬇️ Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
     else:
         st.info("No data available yet. Please upload files in the first tab.")
 
@@ -669,6 +690,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
