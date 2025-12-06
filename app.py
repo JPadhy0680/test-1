@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import io
 import re
+import calendar  # for last-day-of-month
 
 # -----------------------------------------------------
 # App configuration
@@ -65,21 +66,60 @@ current_date = datetime.now().strftime("%d-%b-%Y")
 # -----------------------------------------------------
 # Helper mappings & functions
 # -----------------------------------------------------
+def _digits_only(s: str) -> str:
+    return re.sub(r"\D", "", (s or "").strip())
+
 def format_date(date_str: str) -> str:
-    """Return DD-Mon-YYYY from HL7 date string (YYYYMMDD...) or empty if invalid."""
-    if not date_str or len(date_str) < 8:
+    """
+    Friendly display for HL7 TS with variable precision.
+    - YYYYMMDD -> DD-Mon-YYYY
+    - YYYYMM   -> Mon-YYYY
+    - YYYY     -> YYYY
+    Returns empty string if parsing fails.
+    """
+    if not date_str:
         return ""
+    digits = _digits_only(date_str)
     try:
-        return datetime.strptime(date_str[:8], "%Y%m%d").strftime("%d-%b-%Y")
+        if len(digits) >= 8:
+            dt = datetime.strptime(digits[:8], "%Y%m%d").date()
+            return dt.strftime("%d-%b-%Y")
+        elif len(digits) >= 6:
+            year = int(digits[:4])
+            month = int(digits[4:6])
+            return datetime(year, month, 1).strftime("%b-%Y")
+        elif len(digits) >= 4:
+            year = int(digits[:4])
+            return f"{year}"
+        else:
+            return ""
     except Exception:
         return ""
 
 def parse_date_obj(date_str: str):
-    """Parse HL7 date string (YYYYMMDD...) to datetime.date; return None if invalid."""
-    if not date_str or len(date_str) < 8:
+    """
+    Robust date object for comparisons:
+    - YYYYMMDD -> the exact date
+    - YYYYMM   -> last day of that month
+    - YYYY     -> Dec 31 of that year
+    Returns None if parsing fails or input empty.
+    """
+    if not date_str:
         return None
+    digits = _digits_only(date_str)
     try:
-        return datetime.strptime(date_str[:8], "%Y%m%d").date()
+        if len(digits) >= 8:
+            return datetime.strptime(digits[:8], "%Y%m%d").date()
+        elif len(digits) >= 6:
+            year = int(digits[:4])
+            month = int(digits[4:6])
+            last_day = calendar.monthrange(year, month)[1]
+            return datetime(year, month, last_day).date()
+        elif len(digits) >= 4:
+            year = int(digits[:4])
+            return datetime(year, 12, 31).date()
+        else:
+            return None
     except Exception:
         return None
 
@@ -154,9 +194,7 @@ def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
 # -----------------------------------------------------
 # Product portfolio & launch info
 # -----------------------------------------------------
-# Company portfolio (for matching)
 company_products = [
-    # Category 1 + 2 combined (for detection)
     "abiraterone", "apixaban", "apremilast", "bexarotene",
     "clobazam", "clonazepam", "cyanocobalamin", "dabigatran",
     "dapagliflozin", "dimethyl fumarate", "famotidine",
@@ -168,7 +206,6 @@ company_products = [
     "cyclogest", "progesterone", "luteum", "amelgen"
 ]
 
-# Category 2 set (as provided)
 category2_products = {
     "clobazam", "clonazepam", "cyanocobalamin",
     "famotidine", "itraconazole",
@@ -177,7 +214,6 @@ category2_products = {
     "progesterone", "luteum", "amelgen"
 }
 
-# Launch info mapping
 def parse_dd_mmm_yy(s):
     return datetime.strptime(s, "%d-%b-%y").date()
 
@@ -217,12 +253,10 @@ launch_info = {
     "saxagliptin": {"status": "yet", "date": None},
     "sitagliptin": {"status": "yet", "date": None},
     "tamsulosin + solifenacin": {"status": "launched", "date": parse_dd_mmm_yy("08-May-23")},
-    # Map singles to combo launch date for safety
     "tamsulosin": {"status": "launched", "date": parse_dd_mmm_yy("08-May-23")},
     "solifenacin": {"status": "launched", "date": parse_dd_mmm_yy("08-May-23")},
     "tapentadol": {"status": "launched", "date": parse_dd_mmm_yy("01-Feb-24")},
     "ticagrelor": {"status": "yet", "date": None},
-    # Brands of progesterone (treat as launched without specific dates)
     "cyclogest": {"status": "launched", "date": None},
     "progesterone": {"status": "launched", "date": None},
     "luteum": {"status": "launched", "date": None},
@@ -238,7 +272,6 @@ def resolve_launch(product_name: str, strength_mg):
     key = normalize_text(product_name)
     info = launch_info.get(key)
     if not info:
-        # If unknown, assume launched (no restriction)
         return True, None, None
 
     status = info.get("status")
@@ -250,18 +283,15 @@ def resolve_launch(product_name: str, strength_mg):
 
     if status == "launched_by_strength":
         strengths = info.get("strengths", {})
-        # must match explicitly
         if strength_mg is not None and strength_mg in strengths:
             return True, strengths[strength_mg], None
         return False, None, "Product not Launched"
 
-    # Strength-specific awaited for itraconazole 100 mg
     if key == "itraconazole" and strength_mg is not None:
         spec = info.get("strength_specific", {})
         if spec.get(strength_mg) == "awaited":
             return False, None, "Product not Launched"
 
-    # Default: launched (generic)
     return True, info.get("date"), None
 
 # -----------------------------------------------------
@@ -437,7 +467,6 @@ with tab1:
                 drug_id = id_elem.attrib.get('root', '') if id_elem is not None else ''
                 if drug_id in suspect_ids:
                     name_elem_drug = drug.find('.//hl7:kindOfProduct/hl7:name', ns)
-                    # Collect a friendly display name
                     raw_drug_text = ""
                     if name_elem_drug is not None:
                         if name_elem_drug.text and name_elem_drug.text.strip():
@@ -566,12 +595,13 @@ with tab1:
                     evt_high = reaction.find('.//hl7:effectiveTime/hl7:high', ns)
                     evt_low_str = evt_low.attrib.get('value', '') if evt_low is not None else ''
                     evt_high_str = evt_high.attrib.get('value', '') if evt_high is not None else ''
-                    evt_low_disp = format_date(evt_low_str)
-                    evt_high_disp = format_date(evt_high_str)
-                    evt_low_obj = parse_date_obj(evt_low_str)
-                    evt_high_obj = parse_date_obj(evt_high_str)
+                    evt_low_disp = format_date(evt_low_str)   # Display: Start
+                    evt_high_disp = format_date(evt_high_str) # Display: End
+                    evt_low_obj = parse_date_obj(evt_low_str) # Comparison: Start
+                    evt_high_obj = parse_date_obj(evt_high_str) # Comparison: End
                     case_event_dates.append(("event", evt_low_obj, evt_high_obj))
 
+                    # Event section details — explicit Start/End labels
                     details_parts = [
                         f"Event {event_count}: {llt_term} ({pt_term})",
                         f"Seriousness: {seriousness_display}",
@@ -593,37 +623,29 @@ with tab1:
                 reportability = "Non-Reportable"
 
             # --- Validity assessment ---
-            # Rule: Non-valid if
-            # - no patient details
-            # - any drug start/stop OR event start/stop date < product launch date
-            # - product not launched (reason: "Product not Launched")
             if not patient_detail:
                 case_valid = False
                 case_non_valid_reasons.append("No patient details present")
 
-            # Compare event dates against all known launch dates of matched products
-            # We use minimum launch date among matched products (safest) if multiple.
             matched_launch_dates = []
             for prod, sdt, edt in case_drug_dates:
-                launched, launch_dt, _ = resolve_launch(prod, None)  # strength already handled earlier per-drug
+                launched, launch_dt, _ = resolve_launch(prod, None)  # strength handled earlier
                 if launch_dt:
                     matched_launch_dates.append(launch_dt)
 
+            # If any event is prior to minimum product launch date -> Non-Valid, reason per user
             if matched_launch_dates:
                 min_launch_dt = min(matched_launch_dates)
                 for _, evt_start, evt_stop in case_event_dates:
                     if evt_start and evt_start < min_launch_dt:
                         case_valid = False
-                        case_non_valid_reasons.append(
-                            f"Event start date ({evt_start.strftime('%d-%b-%Y')}) before launch date ({min_launch_dt.strftime('%d-%b-%Y')})"
-                        )
+                        case_non_valid_reasons.append("Drug exposure prior to Lunch")
                     if evt_stop and evt_stop < min_launch_dt:
                         case_valid = False
-                        case_non_valid_reasons.append(
-                            f"Event end date ({evt_stop.strftime('%d-%b-%Y')}) before launch date ({min_launch_dt.strftime('%d-%b-%Y')})"
-                        )
+                        case_non_valid_reasons.append("Drug exposure prior to Lunch")
 
             validity_value = "Valid" if case_valid else "Non-Valid"
+            # Remove duplicates, keep the new phrasing if triggered
             non_valid_reason = "; ".join(sorted(set(case_non_valid_reasons))) if case_non_valid_reasons else ""
 
             # Narrative (full text, no truncation)
@@ -640,12 +662,12 @@ with tab1:
                 'Patient Detail': patient_detail,
                 'Product Detail': " \n ".join(product_details_list),
                 'Event Details': event_details_combined_display,
-                'Narrative': narrative_full,  # ✅ full narrative
-                'Reportability': reportability,  # computed
-                'Validity': validity_value,      # computed
-                'Non-Valid Reason': non_valid_reason,  # computed
-                'Listedness': '',               # editable
-                'App Assessment': '',           # editable
+                'Narrative': narrative_full,
+                'Reportability': reportability,
+                'Validity': validity_value,
+                'Non-Valid Reason': non_valid_reason,
+                'Listedness': '',
+                'App Assessment': '',
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
             })
             parsed_rows += 1
@@ -666,7 +688,6 @@ with tab2:
         if not show_full_narrative:
             df_display['Narrative'] = df_display['Narrative'].astype(str).str.slice(0, 1000)
 
-        # Only these columns editable; computed columns locked
         editable_cols = ['Listedness', 'App Assessment']
         disabled_cols = [col for col in df_display.columns if col not in editable_cols]
 
@@ -677,7 +698,6 @@ with tab2:
             disabled=disabled_cols
         )
 
-        # Single Excel download
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
             edited_df.to_excel(writer, index=False, sheet_name="Parsed Data")
@@ -690,6 +710,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
