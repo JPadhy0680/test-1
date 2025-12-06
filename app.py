@@ -50,9 +50,10 @@ if not is_authenticated():
 with st.expander("📖 Instructions"):
     st.markdown("""
 - Upload **multiple E2B XML files** and **LLT-PT mapping Excel file**.
+- Optionally upload **Validity Code Mapping Excel** to control the validity code output.
 - Parsed data appears in the **Export & Edit** tab.
 - Columns **Listedness** and **App Assessment** remain editable; other computed columns are locked.
-- **Validity** is computed automatically (with reason).
+- **Validity** is computed automatically (with reason and code).
 - Only **one Excel** download button is provided (no CSV/HTML/Summary).
 """)
 
@@ -272,7 +273,6 @@ def resolve_launch(product_name: str, strength_mg):
     key = normalize_text(product_name)
     info = launch_info.get(key)
     if not info:
-        # If unknown, assume launched (no restriction)
         return True, None, None
 
     status = info.get("status")
@@ -288,13 +288,11 @@ def resolve_launch(product_name: str, strength_mg):
             return True, strengths[strength_mg], None
         return False, None, "Product not Lunched"
 
-    # Strength-specific awaited for itraconazole 100 mg
     if key == "itraconazole" and strength_mg is not None:
         spec = info.get("strength_specific", {})
         if spec.get(strength_mg) == "awaited":
             return False, None, "Product not Lunched"
 
-    # Default: launched (generic)
     return True, info.get("date"), None
 
 # -----------------------------------------------------
@@ -317,13 +315,58 @@ with tab1:
         type=["xlsx"],
         help="Upload the MedDRA LLT-PT mapping Excel file."
     )
+    # NEW: Validity code mapping
+    validity_code_file = st.file_uploader(
+        "Upload Validity Code Mapping Excel (Reason → Code, optional Priority)",
+        type=["xlsx"],
+        help="Upload an Excel that maps validity reasons to codes."
+    )
 
     mapping_df = None
     if mapping_file:
         mapping_df = pd.read_excel(mapping_file, engine="openpyxl")
-        # normalize LLT Code to string for robust matching
         if "LLT Code" in mapping_df.columns:
             mapping_df["LLT Code"] = mapping_df["LLT Code"].astype(str).str.strip()
+
+    # Default validity code map & priority
+    validity_code_map = {
+        "Product not Lunched": "VAL01",
+        "Drug exposure prior to Lunch": "VAL02",
+    }
+    reason_priority = {
+        "Product not Lunched": 1,
+        "Drug exposure prior to Lunch": 2,
+    }
+
+    # Load validity code mapping (if provided)
+    if validity_code_file:
+        try:
+            vdf = pd.read_excel(validity_code_file, engine="openpyxl")
+            # Expect columns: Reason, Code, (optional) Priority
+            # Normalize names
+            cols_lower = {c.lower(): c for c in vdf.columns}
+            reason_col = cols_lower.get("reason")
+            code_col = cols_lower.get("code")
+            priority_col = cols_lower.get("priority")
+
+            if reason_col and code_col:
+                vdf["__reason__"] = vdf[reason_col].astype(str).str.strip()
+                vdf["__code__"] = vdf[code_col].astype(str).str.strip()
+                if priority_col:
+                    vdf["__priority__"] = pd.to_numeric(vdf[priority_col], errors="coerce")
+                # Build maps from file (override defaults only for the reasons present)
+                for _, row in vdf.iterrows():
+                    r = row["__reason__"]
+                    c = row["__code__"]
+                    p = row["__priority__"] if priority_col else None
+                    if r:
+                        validity_code_map[r] = c if c else validity_code_map.get(r, "")
+                        if p is not None and not pd.isna(p):
+                            reason_priority[r] = int(p)
+            else:
+                st.warning("Validity Code Mapping file must contain 'Reason' and 'Code' columns.")
+        except Exception as e:
+            st.error(f"Failed to read Validity Code Mapping Excel: {e}")
 
     seriousness_map = {
         "resultsInDeath": "Death",
@@ -515,8 +558,7 @@ with tab1:
                         launched, launch_date, reason = resolve_launch(matched_company_prod, strength_mg)
                         if not launched:
                             case_valid = False
-                            if reason:
-                                case_non_valid_reasons.append("Product not Lunched")
+                            case_non_valid_reasons.append("Product not Lunched")
 
                         # If launched with known date, compare drug dates
                         if launch_date:
@@ -621,21 +663,20 @@ with tab1:
             else:
                 reportability = "Non-Reportable"
 
-            # --- Validity assessment ---
-            if not patient_detail:
-                case_valid = False
-                case_non_valid_reasons.append("Product not Lunched")  # no patient details -> consider invalid setup? (if not desired, remove)
-
+            # --- Validity assessment (two reasons only) ---
+            # Compare event/drug dates against launch dates:
             matched_launch_dates = []
             for prod, sdt, edt in case_drug_dates:
-                launched, launch_dt, _ = resolve_launch(prod, None)  # strength handled earlier
+                launched, launch_dt, reason = resolve_launch(prod, None)  # strength handled earlier
+                if not launched:
+                    case_valid = False
+                    case_non_valid_reasons.append("Product not Lunched")
                 if launch_dt:
                     matched_launch_dates.append(launch_dt)
 
-            # If any event OR drug date is prior to launch date -> Non-Valid, reason per user
-            # Event vs min launch across matched products (safest)
             if matched_launch_dates:
                 min_launch_dt = min(matched_launch_dates)
+                # Event dates
                 for _, evt_start, evt_stop in case_event_dates:
                     if evt_start and evt_start < min_launch_dt:
                         case_valid = False
@@ -643,12 +684,29 @@ with tab1:
                     if evt_stop and evt_stop < min_launch_dt:
                         case_valid = False
                         case_non_valid_reasons.append("Drug exposure prior to Lunch")
+                # Drug dates (in addition to per-drug check above, ensure global rule too)
+                for _, drug_start, drug_stop in case_drug_dates:
+                    if drug_start and drug_start < min_launch_dt:
+                        case_valid = False
+                        case_non_valid_reasons.append("Drug exposure prior to Lunch")
+                    if drug_stop and drug_stop < min_launch_dt:
+                        case_valid = False
+                        case_non_valid_reasons.append("Drug exposure prior to Lunch")
 
             validity_value = "Valid" if case_valid else "Non-Valid"
-            # Deduplicate and keep only the specified reasons
+
+            # Enforce only your two reasons; dedupe
             allowed_reasons = {"Product not Lunched", "Drug exposure prior to Lunch"}
-            filtered = [r for r in case_non_valid_reasons if r in allowed_reasons]
-            non_valid_reason = "; ".join(sorted(set(filtered))) if filtered else ""
+            selected_reasons = sorted(
+                set(r for r in case_non_valid_reasons if r in allowed_reasons),
+                key=lambda r: reason_priority.get(r, 99)
+            )
+            non_valid_reason = "; ".join(selected_reasons) if selected_reasons else ""
+
+            # Validity codes (from mapping or defaults), ordered by priority
+            validity_codes = "; ".join(
+                [validity_code_map.get(r, "") for r in selected_reasons if validity_code_map.get(r, "")]
+            )
 
             # Narrative (full text, no truncation)
             narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
@@ -668,6 +726,7 @@ with tab1:
                 'Reportability': reportability,
                 'Validity': validity_value,
                 'Non-Valid Reason': non_valid_reason,
+                'Validity Code': validity_codes,     # <-- NEW
                 'Listedness': '',
                 'App Assessment': '',
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
@@ -712,6 +771,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
