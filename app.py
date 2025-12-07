@@ -19,6 +19,7 @@ st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 # v1.3: Add Comment column and auto-message when PL/PLGB/PLNI numbers are found in product text
 # v1.3.1: Patch 1 — strength-gated products use earliest strength launch date if strength is unknown
 # v1.4: Lot number detection — comment-only flags when lot text contains competitor/company names; numeric/alphanumeric lots considered valid
+# v1.4.2: If any comment is present, override Validity to "Kindly check comment and assess validity manually"
 
 # --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
@@ -768,6 +769,10 @@ with tab1:
             narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
             narrative_full = clean_value(narrative_full_raw)
 
+            # --- v1.4.2 OVERRIDE: if any comments exist, force manual validity review ---
+            if comments:  # any comment message present
+                validity_value = "Kindly check comment and assess validity manually"
+
             # Collect row (add Comment column)
             all_rows_display.append({
                 'SL No': idx,
@@ -783,7 +788,7 @@ with tab1:
                 'Validity': validity_value,
                 'Listedness': '',
                 'App Assessment': '',
-                'Comment': "; ".join(sorted(set(comments))),  # v1.3+: PL & lot messages
+                'Comment': "; ".join(sorted(set(comments))),  # PL & lot messages (and future ones)
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
             })
             parsed_rows += 1
@@ -802,7 +807,7 @@ with tab2:
         if not show_full_narrative:
             df_display['Narrative'] = df_display['Narrative'].astype(str).str.slice(0, 1000)
 
-        editable_cols = ['Listedness', 'App Assessment']  # keep Comment read-only
+        editable_cols = ['Listedness', 'App Assessment']  # keep Comment & Validity read-only
         disabled_cols = [col for col in df_display.columns if col not in editable_cols]
 
         edited_df = st.data_editor(
@@ -823,6 +828,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
