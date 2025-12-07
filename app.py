@@ -18,6 +18,7 @@ st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 # v1.2: Extend Validity assessment with "Product not Launched" rule
 # v1.3: Add Comment column and auto-message when PL/PLGB/PLNI numbers are found in product text
 # v1.3.1: Patch 1 — strength-gated products use earliest strength launch date if strength is unknown
+# v1.4: Lot number detection — comment-only flags when lot text contains competitor/company names; numeric/alphanumeric lots considered valid
 
 # --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
@@ -305,11 +306,9 @@ def get_launch_date(product_name: str, strength_mg) -> date | None:
         return payload  # may be None
     if status == "launched_by_strength":
         if isinstance(payload, dict) and payload:
-            # exact match if strength provided
             if strength_mg is not None:
                 return payload.get(strength_mg)
-            # conservative fallback: earliest launch date among strengths
-            return min(payload.values())
+            return min(payload.values())  # earliest strength launch date
         return None
     # 'yet' or 'awaited'
     return None
@@ -321,6 +320,31 @@ def get_launch_status(product_name: str) -> str | None:
     if not info:
         return None
     return info[0]
+
+# --- v1.4: Company & lot detection helpers ---
+MY_COMPANY_NAME = "celix"
+
+DEFAULT_COMPETITOR_NAMES = {
+    "glenmark", "cipla", "sun pharma", "dr reddy", "dr. reddy",
+    "torrent", "lupin", "intas", "mankind", "micro labs", "zydus"
+}
+
+def contains_competitor_name(lot_text: str, competitor_names: set[str]) -> bool:
+    """
+    Return True if lot_text contains any competitor/company name (case-insensitive).
+    Numeric/alphanumeric codes (e.g., 'A12345B') will not match unless they include a name.
+    """
+    if not lot_text:
+        return False
+    norm = lot_text.lower()
+    # Do not flag if our own company name appears
+    if MY_COMPANY_NAME.lower() in norm:
+        return False
+    for name in competitor_names:
+        nm = (name or "").lower().strip()
+        if nm and nm in norm:
+            return True
+    return False
 
 # --- Upload & Parse tab ---
 with tab1:
@@ -341,6 +365,23 @@ with tab1:
         type=["xlsx"],
         help="Upload the MedDRA LLT-PT mapping Excel file."
     )
+
+    # Optional: Upload a competitor name list (Excel with column 'Company Identifiers')
+    competitor_names = set(DEFAULT_COMPETITOR_NAMES)
+    comp_file = st.file_uploader(
+        "Upload Competitor Identifiers (Excel)",
+        type=["xlsx"],
+        help="Optional: Provide competitor/company names (one per row under 'Company Identifiers')."
+    )
+    if comp_file:
+        try:
+            comp_df = pd.read_excel(comp_file, engine="openpyxl")
+            if "Company Identifiers" in comp_df.columns:
+                competitor_names = set(
+                    comp_df["Company Identifiers"].astype(str).str.lower().str.strip()
+                )
+        except Exception as e:
+            st.warning(f"Could not read competitor identifier file: {e}")
 
     mapping_df = None
     if mapping_file:
@@ -365,7 +406,7 @@ with tab1:
 
         for idx, uploaded_file in enumerate(uploaded_files, start=1):
             warnings = []  # per-file warnings
-            comments = []  # v1.3: per-file comments (e.g., PL messages)
+            comments = []  # v1.3+: per-file comments (PL messages, lot messages)
 
             try:
                 tree = ET.parse(uploaded_file)
@@ -584,17 +625,20 @@ with tab1:
                             if lot_clean:
                                 parts.append(f"Lot No: {lot_clean}")
 
-                        # --- v1.3: add comment messages when PL appears in product-related text
+                        # --- v1.3: PL detection -> add comments
                         pl_hits = set()
                         for t in [display_name, text_clean, form_clean, lot_clean]:
                             for pl in extract_pl_numbers(t):
                                 pl_hits.add(pl)
                         for pl in sorted(pl_hits):
-                            # Use user's preferred phrasing "plz"
                             if display_name:
                                 comments.append(f"plz check product name as {display_name} {pl} given")
                             else:
                                 comments.append(f"plz check product name: {pl} given")
+
+                        # --- v1.4: Lot detection -> add comments when lot contains competitor/company names
+                        if lot_clean and contains_competitor_name(lot_clean, competitor_names):
+                            comments.append(f"Lot number '{lot_clean}' may belong to another company — please verify.")
 
                         # Only add this drug block if at least one displayable part remains
                         if parts:
@@ -739,7 +783,7 @@ with tab1:
                 'Validity': validity_value,
                 'Listedness': '',
                 'App Assessment': '',
-                'Comment': "; ".join(sorted(set(comments))),  # v1.3: PL messages and similar
+                'Comment': "; ".join(sorted(set(comments))),  # v1.3+: PL & lot messages
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
             })
             parsed_rows += 1
@@ -779,5 +823,6 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
