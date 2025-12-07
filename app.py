@@ -16,6 +16,7 @@ st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 # Baseline v1.0 (do-not-modify core behaviors)
 # v1.1: Add Validity assessment + replace st.experimental_rerun() with st.rerun()
 # v1.2: Extend Validity assessment with "Product not Launched" rule
+# v1.3: Add Comment column and auto-message when PL/PLGB/PLNI numbers are found in product text
 
 # --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
@@ -201,6 +202,24 @@ def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
                 pass
     return None
 
+# --- NEW (v1.3): PL number extraction (PL, PLGB, PLNI) ---
+PL_PATTERN = re.compile(
+    r'\b(PL|PLGB|PLNI)\s*([0-9]{5})\s*/\s*([0-9]{4,5})\b',
+    re.IGNORECASE
+)
+
+def extract_pl_numbers(text: str):
+    """Return list of normalized PL strings like 'PL 12345/0001' found in the text."""
+    out = []
+    if not text:
+        return out
+    for m in PL_PATTERN.finditer(text):
+        prefix = m.group(1).upper()
+        company_code = m.group(2)
+        product_code = m.group(3)
+        out.append(f"{prefix} {company_code}/{product_code}")
+    return out
+
 # Product portfolio (for matching & Category 2 flag only)
 company_products = [
     "abiraterone", "apixaban", "apremilast", "bexarotene",
@@ -340,6 +359,8 @@ with tab1:
 
         for idx, uploaded_file in enumerate(uploaded_files, start=1):
             warnings = []  # per-file warnings
+            comments = []  # v1.3: per-file comments (e.g., PL messages)
+
             try:
                 tree = ET.parse(uploaded_file)
                 root = tree.getroot()
@@ -524,6 +545,7 @@ with tab1:
                         if display_name:
                             parts.append(f"Drug: {display_name}")
 
+                        text_clean = ""
                         if text_elem is not None and text_elem.text:
                             text_clean = clean_value(text_elem.text)
                             if text_clean:
@@ -543,16 +565,30 @@ with tab1:
                             parts.append(f"Stop Date: {stop_date_disp}")
 
                         form_elem = drug.find('.//hl7:formCode/hl7:originalText', ns)
+                        form_clean = ""
                         if form_elem is not None and form_elem.text:
                             form_clean = clean_value(form_elem.text)
                             if form_clean:
                                 parts.append(f"Formulation: {form_clean}")
 
                         lot_elem = drug.find('.//hl7:lotNumberText', ns)
+                        lot_clean = ""
                         if lot_elem is not None and lot_elem.text:
                             lot_clean = clean_value(lot_elem.text)
                             if lot_clean:
                                 parts.append(f"Lot No: {lot_clean}")
+
+                        # --- v1.3: add comment messages when PL appears in product-related text
+                        pl_hits = set()
+                        for t in [display_name, text_clean, form_clean, lot_clean]:
+                            for pl in extract_pl_numbers(t):
+                                pl_hits.add(pl)
+                        for pl in sorted(pl_hits):
+                            # Use user's preferred phrasing "plz"
+                            if display_name:
+                                comments.append(f"plz check product name as {display_name} {pl} given")
+                            else:
+                                comments.append(f"plz check product name: {pl} given")
 
                         # Only add this drug block if at least one displayable part remains
                         if parts:
@@ -682,7 +718,7 @@ with tab1:
             narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
             narrative_full = clean_value(narrative_full_raw)
 
-            # Collect row
+            # Collect row (add Comment column)
             all_rows_display.append({
                 'SL No': idx,
                 'Date': current_date,
@@ -694,9 +730,10 @@ with tab1:
                 'Event Details': event_details_combined_display,
                 'Narrative': narrative_full,
                 'Reportability': reportability,
-                'Validity': validity_value,   # NEW
+                'Validity': validity_value,
                 'Listedness': '',
                 'App Assessment': '',
+                'Comment': "; ".join(sorted(set(comments))),  # v1.3: PL messages and similar
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
             })
             parsed_rows += 1
@@ -715,7 +752,7 @@ with tab2:
         if not show_full_narrative:
             df_display['Narrative'] = df_display['Narrative'].astype(str).str.slice(0, 1000)
 
-        editable_cols = ['Listedness', 'App Assessment']
+        editable_cols = ['Listedness', 'App Assessment']  # keep Comment read-only
         disabled_cols = [col for col in df_display.columns if col not in editable_cols]
 
         edited_df = st.data_editor(
@@ -736,3 +773,4 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
