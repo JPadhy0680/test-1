@@ -16,15 +16,16 @@ st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 # Baseline v1.0 (do-not-modify core behaviors)
 # v1.1: Add Validity assessment + replace st.experimental_rerun() with st.rerun()
 # v1.2: Extend Validity assessment with "Product not Launched" rule
-# v1.3: Add Comment column and auto-message when PL/PLGB/PLNI numbers are found in product text
-# v1.3.1: Patch 1 — strength-gated products use earliest strength launch date if strength is unknown
-# v1.4: Lot number detection — comment-only flags when lot text contains competitor/company names; numeric/alphanumeric lots considered valid
-# v1.4.2: If any comment is present, override Validity to "Kindly check comment and assess validity manually"
-# v1.4.3: Reflect MAH name in product section and mark Non-Valid (Non-company product) when MAH != Celix
-# v1.4.4: Clear Inputs preserves auth & resets uploaders (Option A)
-# v1.4.5: REMOVED competitor upload UI; finalized baseline
-# v1.4.6: Event Details formatting fix + Case Age (days) next to Transmission Date
+# v1.3: Comment column + PL detection
+# v1.3.1: Strength-gated earliest launch fallback
+# v1.4: Lot detection (built-in competitor list; numeric/alphanumeric lots are fine)
+# v1.4.2: Comment present → manual validity message
+# v1.4.3: Show MAH in Product; Non-company product validity (MAH ≠ Celix)
+# v1.4.4: Clear Inputs preserves auth & resets uploaders
+# v1.4.5: Competitor upload removed (baseline finalized)
+# v1.4.6: Event details formatting (semicolon-joined); Case Age (days)
 # v1.4.7: Listedness Reference upload (Drug Name, LLT) -> Listed/Unlisted prefill
+# v1.4.8: Reportability = NA for Non-Valid cases + fix NameError (age unit mapping)
 
 # --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
@@ -58,7 +59,7 @@ if not is_authenticated():
 with st.expander("📖 Instructions"):
     st.markdown("""
 - Upload **multiple E2B XML files** and **LLT-PT mapping Excel file**.
-- (New) Upload **Listedness Reference** Excel: columns `Drug Name`, `LLT` — case-insensitive match.
+- (Optional) Upload **Listedness Reference** Excel: columns `Drug Name`, `LLT` — case-insensitive match.
 - Parsed data appears in the **Export & Edit** tab.
 - Columns **Listedness** and **App Assessment** remain editable; other computed columns are locked.
 - Only **one Excel** download button is provided.
@@ -77,6 +78,13 @@ def _digits_only(s: str) -> str:
     return re.sub(r"\D", "", (s or "").strip())
 
 def format_date(date_str: str) -> str:
+    """
+    Friendly display for HL7 TS with variable precision.
+    - YYYYMMDD -> DD-Mon-YYYY
+    - YYYYMM   -> Mon-YYYY
+    - YYYY     -> YYYY
+    Returns empty string if parsing fails.
+    """
     if not date_str:
         return ""
     digits = _digits_only(date_str)
@@ -85,16 +93,25 @@ def format_date(date_str: str) -> str:
             dt = datetime.strptime(digits[:8], "%Y%m%d").date()
             return dt.strftime("%d-%b-%Y")
         elif len(digits) >= 6:
-            year = int(digits[:4]); month = int(digits[4:6])
+            year = int(digits[:4])
+            month = int(digits[4:6])
             return datetime(year, month, 1).strftime("%b-%Y")
         elif len(digits) >= 4:
-            year = int(digits[:4]); return f"{year}"
+            year = int(digits[:4])
+            return f"{year}"
         else:
             return ""
     except Exception:
         return ""
 
 def parse_date_obj(date_str: str):
+    """
+    Robust date object for comparisons:
+    - YYYYMMDD -> the exact date
+    - YYYYMM   -> last day of that month
+    - YYYY     -> Dec 31 of that year
+    Returns None if parsing fails or input empty.
+    """
     if not date_str:
         return None
     digits = _digits_only(date_str)
@@ -102,11 +119,13 @@ def parse_date_obj(date_str: str):
         if len(digits) >= 8:
             return datetime.strptime(digits[:8], "%Y%m%d").date()
         elif len(digits) >= 6:
-            year = int(digits[:4]); month = int(digits[4:6])
+            year = int(digits[:4])
+            month = int(digits[4:6])
             last_day = calendar.monthrange(year, month)[1]
             return datetime(year, month, last_day).date()
         elif len(digits) >= 4:
-            year = int(digits[:4]); return datetime(year, 12, 31).date()
+            year = int(digits[:4])
+            return datetime(year, 12, 31).date()
         else:
             return None
     except Exception:
@@ -114,8 +133,11 @@ def parse_date_obj(date_str: str):
 
 def map_reporter(code):
     return {
-        "1": "Physician", "2": "Pharmacist", "3": "Other health professional",
-        "4": "Lawyer", "5": "Consumer or other non-health professional"
+        "1": "Physician",
+        "2": "Pharmacist",
+        "3": "Other health professional",
+        "4": "Lawyer",
+        "5": "Consumer or other non-health professional"
     }.get(code, "Unknown")
 
 def map_gender(code):
@@ -123,16 +145,34 @@ def map_gender(code):
 
 def map_outcome(code):
     return {
-        "1": "Recovered/Resolved", "2": "Recovering/Resolving", "3": "Not recovered/Ongoing",
-        "4": "Recovered with sequelae", "5": "Fatal", "0": "Unknown"
+        "1": "Recovered/Resolved",
+        "2": "Recovering/Resolving",
+        "3": "Not recovered/Ongoing",
+        "4": "Recovered with sequelae",
+        "5": "Fatal",
+        "0": "Unknown"
     }.get(code, "Unknown")
 
-# Unknown handling
-UNKNOWN_TOKENS = {"unk", "asku", "unknown"}
+# --- FIX: age unit mapping helper (prevents NameError) ---
+AGE_UNIT_MAP = {"a": "year", "b": "month"}
+def map_age_unit(raw_unit: str) -> str:
+    """
+    Safely map HL7 age unit codes to text. Returns the original unit if unknown.
+    raw_unit: typically 'a' (year) or 'b' (month), but may be blank/other.
+    """
+    if raw_unit is None:
+        return ""
+    ru = str(raw_unit).strip().lower()
+    return AGE_UNIT_MAP.get(ru, ru)
+
+# Unknown handling helpers
+UNKNOWN_TOKENS = {"unk", "asku", "unknown"}  # lower-cased tokens
 def is_unknown(value: str) -> bool:
-    if value is None: return True
+    if value is None:
+        return True
     v = str(value).strip()
-    if not v: return True
+    if not v:
+        return True
     return v.lower() in UNKNOWN_TOKENS
 def clean_value(value: str) -> str:
     return "" if is_unknown(value) else str(value)
@@ -140,7 +180,7 @@ def clean_value(value: str) -> str:
 # Normalization + inclusive matching
 def normalize_text(s: str) -> str:
     s = (s or "").lower()
-    s = re.sub(r'[^a-z0-9\s\+\-]', ' ', s)
+    s = re.sub(r'[^a-z0-9\s\+\-]', ' ', s)  # keep + and - for combos
     s = re.sub(r'\s+', ' ', s).strip()
     return s
 
@@ -148,34 +188,47 @@ def contains_company_product(text: str, company_products: list) -> str:
     norm = normalize_text(text)
     for prod in company_products:
         pnorm = normalize_text(prod)
-        if not pnorm: continue
+        if not pnorm:
+            continue
         pattern = r'\b' + re.escape(pnorm) + r'\b'
         if re.search(pattern, norm):
             return prod
     return ""
 
 # Strength extraction (mg)
-MG_PATTERN = re.compile(r"""(\d{1,3}(?:,\d{3})*\d+(?:\.\d{1,3})?)\s*mg\b""",
-                        re.IGNORECASE | re.VERBOSE)
+MG_PATTERN = re.compile(r"""
+    (\d{1,3}(?:,\d{3})*\d+(?:\.\d{1,3})?)
+    \s*
+    mg\b
+""", re.IGNORECASE | re.VERBOSE)
 def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
     if dose_val and dose_unit and dose_unit.lower() == "mg":
-        try: return float(str(dose_val).replace(",", ""))
-        except Exception: pass
+        try:
+            return float(str(dose_val).replace(",", ""))
+        except Exception:
+            pass
     if raw_text:
         m = MG_PATTERN.search(raw_text or "")
         if m:
-            try: return float(m.group(1).replace(",", ""))
-            except Exception: pass
+            try:
+                return float(m.group(1).replace(",", ""))
+            except Exception:
+                pass
     return None
 
 # PL number extraction (PL, PLGB, PLNI)
-PL_PATTERN = re.compile(r'\b(PL|PLGB|PLNI)\s*([0-9]{5})\s*/\s*([0-9]{4,5})\b',
-                        re.IGNORECASE)
+PL_PATTERN = re.compile(
+    r'\b(PL|PLGB|PLNI)\s*([0-9]{5})\s*/\s*([0-9]{4,5})\b',
+    re.IGNORECASE
+)
 def extract_pl_numbers(text: str):
     out = []
-    if not text: return out
+    if not text:
+        return out
     for m in PL_PATTERN.finditer(text):
-        prefix = m.group(1).upper(); company_code = m.group(2); product_code = m.group(3)
+        prefix = m.group(1).upper()
+        company_code = m.group(2)
+        product_code = m.group(3)
         out.append(f"{prefix} {company_code}/{product_code}")
     return out
 
@@ -199,7 +252,7 @@ category2_products = {
     "progesterone", "luteum", "amelgen"
 }
 
-# Launch dates
+# Launch dates (for validity comparison)
 def parse_dd_mmm_yy(s):
     return datetime.strptime(s, "%d-%b-%y").date()
 
@@ -247,21 +300,25 @@ LAUNCH_INFO = {
 def get_launch_date(product_name: str, strength_mg) -> date | None:
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
-    if not info: return None
+    if not info:
+        return None
     status, payload = info
-    if status == "launched": return payload
+    if status == "launched":
+        return payload
     if status == "launched_by_strength":
         if isinstance(payload, dict) and payload:
             if strength_mg is not None:
                 return payload.get(strength_mg)
-            return min(payload.values())  # fallback
+            return min(payload.values())  # conservative fallback
         return None
-    return None  # 'yet'/'awaited'
+    # 'yet' or 'awaited'
+    return None
 
 def get_launch_status(product_name: str) -> str | None:
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
-    if not info: return None
+    if not info:
+        return None
     return info[0]
 
 # Company & lot detection helpers
@@ -271,12 +328,15 @@ DEFAULT_COMPETITOR_NAMES = {
     "torrent", "lupin", "intas", "mankind", "micro labs", "zydus"
 }
 def contains_competitor_name(lot_text: str, competitor_names: set[str]) -> bool:
-    if not lot_text: return False
+    if not lot_text:
+        return False
     norm = lot_text.lower()
-    if MY_COMPANY_NAME.lower() in norm: return False
+    if MY_COMPANY_NAME.lower() in norm:
+        return False
     for name in competitor_names:
         nm = (name or "").lower().strip()
-        if nm and nm in norm: return True
+        if nm and nm in norm:
+            return True
     return False
 
 # MAH extraction helper
@@ -299,7 +359,8 @@ with tab1:
         for k in ["df_display", "edited_df"]:
             st.session_state.pop(k, None)
         st.session_state["uploader_version"] = st.session_state.get("uploader_version", 0) + 1
-        if auth_exp: st.session_state["auth_expires"] = auth_exp
+        if auth_exp:
+            st.session_state["auth_expires"] = auth_exp
         st.rerun()
 
     ver = st.session_state.get("uploader_version", 0)
@@ -319,7 +380,7 @@ with tab1:
         key=f"map_uploader_{ver}"
     )
 
-    # NEW: Listedness Reference (Drug Name, LLT)
+    # Listedness Reference (Drug Name, LLT)
     listed_ref_file = st.file_uploader(
         "Upload Listedness Reference (Excel: columns 'Drug Name','LLT')",
         type=["xlsx"],
@@ -344,7 +405,6 @@ with tab1:
             dn_col = cols_lower.get("drug name")
             llt_col = cols_lower.get("llt")
             if dn_col and llt_col:
-                # Normalize both fields and add to set
                 for _, row in ref_df.iterrows():
                     dn = normalize_text(str(row[dn_col])) if pd.notna(row[dn_col]) else ""
                     lt = normalize_text(str(row[llt_col])) if pd.notna(row[llt_col]) else ""
@@ -356,7 +416,8 @@ with tab1:
             st.error(f"Failed to read Listedness Reference Excel: {e}")
 
     seriousness_map = {
-        "resultsInDeath": "Death", "isLifeThreatening": "LT",
+        "resultsInDeath": "Death",
+        "isLifeThreatening": "LT",
         "requiresInpatientHospitalization": "Hospital",
         "resultsInPersistentOrSignificantDisability": "Disability",
         "congenitalAnomalyBirthDefect": "Congenital",
@@ -396,7 +457,8 @@ with tab1:
             try:
                 if transmission_date_obj:
                     case_age_days = (datetime.now().date() - transmission_date_obj).days
-                    if case_age_days < 0: case_age_days = 0
+                    if case_age_days < 0:
+                        case_age_days = 0
             except Exception:
                 case_age_days = ""
 
@@ -414,7 +476,7 @@ with tab1:
             if age_elem is not None:
                 age_val = age_elem.attrib.get('value', '')
                 raw_unit = age_elem.attrib.get('unit', '')
-                unit_text = age_unit_map.get(raw_unit, raw_unit)
+                unit_text = map_age_unit(raw_unit)          # FIX: safe mapping; prevents NameError
                 age_val = clean_value(age_val)
                 unit_text_disp = clean_value(unit_text)
                 if age_val:
@@ -690,7 +752,7 @@ with tab1:
 
             event_details_combined_display = "\n".join(event_details_list)
 
-            # Reportability
+            # Reportability (initial, may be overridden to NA later)
             if case_has_serious_event and case_has_category2:
                 reportability = "Category 2, serious, reportable case"
             else:
@@ -699,19 +761,22 @@ with tab1:
             # --- Listedness (from uploaded reference) ---
             listedness_value = ""
             if listed_pairs and case_products_norm and case_llts_norm:
-                # Listed if any pair in the case exists in reference
                 is_listed = any((p, l) in listed_pairs for p in case_products_norm for l in case_llts_norm)
                 listedness_value = "Listed" if is_listed else "Unlisted"
 
             # --- Validity assessment (ordered single reason) ---
             validity_reason = None
+
+            # Rule 1: No patient details
             if not has_any_patient_detail:
                 validity_reason = "No patient details"
 
+            # Rule 1a: MAH differs from Celix -> Non-company product
             if validity_reason is None:
                 if any(name and MY_COMPANY_NAME.lower() not in name.lower() for name in case_mah_names):
                     validity_reason = "Non-company product"
 
+            # Rule 3: Product not Launched
             if validity_reason is None:
                 for prod, strength_mg, sdt, edt in case_drug_dates:
                     status = get_launch_status(prod)
@@ -719,17 +784,23 @@ with tab1:
                         validity_reason = "Product not Launched"
                         break
 
+            # Rule 2: Any event/drug dates prior to launch date
             if validity_reason is None:
                 launch_dates = []
                 for prod, strength_mg, sdt, edt in case_drug_dates:
                     ld = get_launch_date(prod, strength_mg)
-                    if ld: launch_dates.append(ld)
+                    if ld:
+                        launch_dates.append(ld)
                 if launch_dates:
                     min_launch_dt = min(launch_dates)
+
+                    # Check event dates
                     for _, evt_start, evt_stop in case_event_dates:
                         if (evt_start and evt_start < min_launch_dt) or (evt_stop and evt_stop < min_launch_dt):
                             validity_reason = "Drug exposure prior to Launch"
                             break
+
+                    # Check drug dates only if no reason yet
                     if validity_reason is None:
                         for _, _, drug_start, drug_stop in case_drug_dates:
                             if (drug_start and drug_start < min_launch_dt) or (drug_stop and drug_stop < min_launch_dt):
@@ -743,9 +814,13 @@ with tab1:
             narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
             narrative_full = clean_value(narrative_full_raw)
 
-            # Comment→Validity override
+            # Comment→Validity override: manual message only if no invalid reason
             if comments and validity_reason is None:
                 validity_value = "Kindly check comment and assess validity manually"
+
+            # --- NEW: Reportability NA override for Non-Valid cases ---
+            if isinstance(validity_value, str) and validity_value.startswith("Non-Valid"):
+                reportability = "NA"
 
             # Collect row
             all_rows_display.append({
@@ -761,7 +836,7 @@ with tab1:
                 'Narrative': narrative_full,
                 'Reportability': reportability,
                 'Validity': validity_value,
-                'Listedness': listedness_value,   # <-- prefilled from reference (still editable)
+                'Listedness': listedness_value,   # prefilled (editable)
                 'App Assessment': '',
                 'Comment': "; ".join(sorted(set(comments))),
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
@@ -782,7 +857,7 @@ with tab2:
         if not show_full_narrative:
             df_display['Narrative'] = df_display['Narrative'].astype(str).str.slice(0, 1000)
 
-        # Keep Listedness & App Assessment editable
+        # Editable columns
         editable_cols = ['Listedness', 'App Assessment']
         disabled_cols = [col for col in df_display.columns if col not in editable_cols]
 
@@ -804,6 +879,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
