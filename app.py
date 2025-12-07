@@ -17,6 +17,7 @@ st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 # v1.1: Add Validity assessment + replace st.experimental_rerun() with st.rerun()
 # v1.2: Extend Validity assessment with "Product not Launched" rule
 # v1.3: Add Comment column and auto-message when PL/PLGB/PLNI numbers are found in product text
+# v1.3.1: Patch 1 — strength-gated products use earliest strength launch date if strength is unknown
 
 # --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
@@ -202,7 +203,7 @@ def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
                 pass
     return None
 
-# --- NEW (v1.3): PL number extraction (PL, PLGB, PLNI) ---
+# --- PL number extraction (PL, PLGB, PLNI) ---
 PL_PATTERN = re.compile(
     r'\b(PL|PLGB|PLNI)\s*([0-9]{5})\s*/\s*([0-9]{4,5})\b',
     re.IGNORECASE
@@ -285,14 +286,15 @@ LAUNCH_INFO = {
     "amelgen": ("launched", None),
 }
 
+# --- PATCH 1: updated function with conservative fallback for strength-gated products ---
 def get_launch_date(product_name: str, strength_mg) -> date | None:
     """
     Return the launch date for a matched company product.
-    Rules:
     - 'launched' -> return date if present (else None)
-    - 'launched_by_strength' -> return date only if strength provided and matches
-    - 'yet'/'awaited' -> return None (per your spec, we do not invalidate on 'not launched' via dates)
-    - unknown product -> None
+    - 'launched_by_strength' -> return date only if strength provided and matches;
+      if strength is unknown, return the EARLIEST strength launch date (conservative fallback).
+    - 'yet'/'awaited' -> None
+    - unknown -> None
     """
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
@@ -302,8 +304,12 @@ def get_launch_date(product_name: str, strength_mg) -> date | None:
     if status == "launched":
         return payload  # may be None
     if status == "launched_by_strength":
-        if strength_mg is not None and isinstance(payload, dict):
-            return payload.get(strength_mg)
+        if isinstance(payload, dict) and payload:
+            # exact match if strength provided
+            if strength_mg is not None:
+                return payload.get(strength_mg)
+            # conservative fallback: earliest launch date among strengths
+            return min(payload.values())
         return None
     # 'yet' or 'awaited'
     return None
@@ -773,4 +779,5 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
