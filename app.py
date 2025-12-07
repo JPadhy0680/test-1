@@ -5,18 +5,14 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import io
 import re
-import calendar  # for last-day-of-month
+import calendar  # still used for date parsing (last-day-of-month)
 
-# -----------------------------------------------------
-# App configuration
-# -----------------------------------------------------
+# --- App configuration ---
 st.set_page_config(page_title="E2B_R3 XML Parser Application", layout="wide")
 st.markdown(""" """, unsafe_allow_html=True)
 st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 
-# -----------------------------------------------------
-# Password with 24h persistence (uses st.secrets if present)
-# -----------------------------------------------------
+# --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
     DEFAULT_PASSWORD = "7064242966"
     try:
@@ -44,29 +40,21 @@ if not is_authenticated():
             st.warning("Please enter the correct password to proceed.")
         st.stop()
 
-# -----------------------------------------------------
-# Instructions
-# -----------------------------------------------------
+# --- Instructions ---
 with st.expander("📖 Instructions"):
     st.markdown("""
 - Upload **multiple E2B XML files** and **LLT-PT mapping Excel file**.
-- Optionally upload **Validity Code Mapping Excel** to control the validity code output.
 - Parsed data appears in the **Export & Edit** tab.
 - Columns **Listedness** and **App Assessment** remain editable; other computed columns are locked.
-- **Validity** is computed automatically (with reason and code).
 - Only **one Excel** download button is provided (no CSV/HTML/Summary).
 """)
 
-# -----------------------------------------------------
-# Tabs
-# -----------------------------------------------------
+# --- Tabs ---
 tab1, tab2 = st.tabs(["Upload & Parse", "Export & Edit"])
 all_rows_display = []
 current_date = datetime.now().strftime("%d-%b-%Y")
 
-# -----------------------------------------------------
-# Helper mappings & functions
-# -----------------------------------------------------
+# --- Helper mappings & functions ---
 def _digits_only(s: str) -> str:
     return re.sub(r"\D", "", (s or "").strip())
 
@@ -169,9 +157,9 @@ def contains_company_product(text: str, company_products: list) -> str:
 
 # Robust strength (mg) extraction: supports "1,000 mg", "2.5 mg", case-insensitive
 MG_PATTERN = re.compile(r"""
-    (\d{1,3}(?:,\d{3})*|\d+(?:\.\d{1,3})?)   # numeric value, supports thousands and decimals
+    (\d{1,3}(?:,\d{3})*\d+(?:\.\d{1,3})?)  # numeric value, supports thousands and decimals
     \s*
-    mg\b                                     # mg unit, word boundary
+    mg\b                                  # mg unit, word boundary
 """, re.IGNORECASE | re.VERBOSE)
 
 def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
@@ -192,9 +180,7 @@ def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
                 pass
     return None
 
-# -----------------------------------------------------
-# Product portfolio & launch info
-# -----------------------------------------------------
+# Product portfolio (kept for matching/category only; no validity checks)
 company_products = [
     "abiraterone", "apixaban", "apremilast", "bexarotene",
     "clobazam", "clonazepam", "cyanocobalamin", "dabigatran",
@@ -215,89 +201,7 @@ category2_products = {
     "progesterone", "luteum", "amelgen"
 }
 
-def parse_dd_mmm_yy(s):
-    return datetime.strptime(s, "%d-%b-%y").date()
-
-launch_info = {
-    "abiraterone": {"status": "launched", "date": parse_dd_mmm_yy("08-Sep-22")},
-    "apixaban": {"status": "launched", "date": parse_dd_mmm_yy("26-Feb-25")},
-    "apremilast": {"status": "yet", "date": None},
-    "bexarotene": {"status": "launched", "date": parse_dd_mmm_yy("19-Jan-23")},
-    "clobazam": {"status": "launched", "date": parse_dd_mmm_yy("26-Sep-24")},
-    "clonazepam": {"status": "launched", "date": parse_dd_mmm_yy("20-Jan-25")},
-    "cyanocobalamin": {"status": "awaited", "date": None},
-    "dabigatran": {"status": "yet", "date": None},
-    "dapagliflozin": {
-        "status": "launched_by_strength",
-        "strengths": {10.0: parse_dd_mmm_yy("26-Aug-25"), 5.0: parse_dd_mmm_yy("10-Sep-25")}
-    },
-    "dimethyl fumarate": {"status": "launched", "date": parse_dd_mmm_yy("05-Feb-24")},
-    "famotidine": {"status": "launched", "date": parse_dd_mmm_yy("21-Feb-25")},
-    "fesoterodine": {"status": "yet", "date": None},
-    "icatibant": {"status": "launched", "date": parse_dd_mmm_yy("28-Jul-22")},
-    "itraconazole": {"status": "awaited", "date": None, "strength_specific": {100.0: "awaited"}},
-    "linagliptin": {"status": "yet", "date": None},
-    "linagliptin + metformin": {"status": "awaited", "date": None},
-    "nintedanib": {"status": "awaited", "date": None},
-    "pirfenidone": {"status": "launched", "date": parse_dd_mmm_yy("29-Jun-22")},
-    "raltegravir": {"status": "awaited", "date": None},
-    "ranolazine": {"status": "launched", "date": parse_dd_mmm_yy("20-Jul-23")},
-    "rivaroxaban": {
-        "status": "launched_by_strength",
-        "strengths": {
-            2.5: parse_dd_mmm_yy("02-Apr-24"),
-            10.0: parse_dd_mmm_yy("23-May-24"),
-            15.0: parse_dd_mmm_yy("23-May-24"),
-            20.0: parse_dd_mmm_yy("23-May-24"),
-        }
-    },
-    "saxagliptin": {"status": "yet", "date": None},
-    "sitagliptin": {"status": "yet", "date": None},
-    "tamsulosin + solifenacin": {"status": "launched", "date": parse_dd_mmm_yy("08-May-23")},
-    "tamsulosin": {"status": "launched", "date": parse_dd_mmm_yy("08-May-23")},
-    "solifenacin": {"status": "launched", "date": parse_dd_mmm_yy("08-May-23")},
-    "tapentadol": {"status": "launched", "date": parse_dd_mmm_yy("01-Feb-24")},
-    "ticagrelor": {"status": "yet", "date": None},
-    "cyclogest": {"status": "launched", "date": None},
-    "progesterone": {"status": "launched", "date": None},
-    "luteum": {"status": "launched", "date": None},
-    "amelgen": {"status": "launched", "date": None},
-}
-
-def resolve_launch(product_name: str, strength_mg):
-    """
-    Return (is_launched: bool, launch_date: date or None, non_launch_reason: str or None)
-    Reason text for non-launched: "Product not Lunched"
-    Safer rule for strength-gated products: require explicit strength match; otherwise non-launched.
-    """
-    key = normalize_text(product_name)
-    info = launch_info.get(key)
-    if not info:
-        return True, None, None
-
-    status = info.get("status")
-    if status == "launched":
-        return True, info.get("date"), None
-
-    if status in ("yet", "awaited"):
-        return False, None, "Product not Lunched"
-
-    if status == "launched_by_strength":
-        strengths = info.get("strengths", {})
-        if strength_mg is not None and strength_mg in strengths:
-            return True, strengths[strength_mg], None
-        return False, None, "Product not Lunched"
-
-    if key == "itraconazole" and strength_mg is not None:
-        spec = info.get("strength_specific", {})
-        if spec.get(strength_mg) == "awaited":
-            return False, None, "Product not Lunched"
-
-    return True, info.get("date"), None
-
-# -----------------------------------------------------
-# Upload & Parse tab
-# -----------------------------------------------------
+# --- Upload & Parse tab ---
 with tab1:
     st.markdown("### 🔎 Upload Files 🗂️")
     if st.button("Clear Inputs", help="Click to clear all uploaded files and reset the app."):
@@ -310,16 +214,11 @@ with tab1:
         accept_multiple_files=True,
         help="Upload one or more E2B XML files for parsing."
     )
+
     mapping_file = st.file_uploader(
         "Upload LLT-PT Mapping Excel file",
         type=["xlsx"],
         help="Upload the MedDRA LLT-PT mapping Excel file."
-    )
-    # NEW: Validity code mapping
-    validity_code_file = st.file_uploader(
-        "Upload Validity Code Mapping Excel (Reason → Code, optional Priority)",
-        type=["xlsx"],
-        help="Upload an Excel that maps validity reasons to codes."
     )
 
     mapping_df = None
@@ -327,46 +226,6 @@ with tab1:
         mapping_df = pd.read_excel(mapping_file, engine="openpyxl")
         if "LLT Code" in mapping_df.columns:
             mapping_df["LLT Code"] = mapping_df["LLT Code"].astype(str).str.strip()
-
-    # Default validity code map & priority
-    validity_code_map = {
-        "Product not Lunched": "VAL01",
-        "Drug exposure prior to Lunch": "VAL02",
-    }
-    reason_priority = {
-        "Product not Lunched": 1,
-        "Drug exposure prior to Lunch": 2,
-    }
-
-    # Load validity code mapping (if provided)
-    if validity_code_file:
-        try:
-            vdf = pd.read_excel(validity_code_file, engine="openpyxl")
-            # Expect columns: Reason, Code, (optional) Priority
-            # Normalize names
-            cols_lower = {c.lower(): c for c in vdf.columns}
-            reason_col = cols_lower.get("reason")
-            code_col = cols_lower.get("code")
-            priority_col = cols_lower.get("priority")
-
-            if reason_col and code_col:
-                vdf["__reason__"] = vdf[reason_col].astype(str).str.strip()
-                vdf["__code__"] = vdf[code_col].astype(str).str.strip()
-                if priority_col:
-                    vdf["__priority__"] = pd.to_numeric(vdf[priority_col], errors="coerce")
-                # Build maps from file (override defaults only for the reasons present)
-                for _, row in vdf.iterrows():
-                    r = row["__reason__"]
-                    c = row["__code__"]
-                    p = row["__priority__"] if priority_col else None
-                    if r:
-                        validity_code_map[r] = c if c else validity_code_map.get(r, "")
-                        if p is not None and not pd.isna(p):
-                            reason_priority[r] = int(p)
-            else:
-                st.warning("Validity Code Mapping file must contain 'Reason' and 'Code' columns.")
-        except Exception as e:
-            st.error(f"Failed to read Validity Code Mapping Excel: {e}")
 
     seriousness_map = {
         "resultsInDeath": "Death",
@@ -408,7 +267,6 @@ with tab1:
             # Patient demographics
             gender_elem = root.find('.//hl7:administrativeGenderCode', ns)
             gender = map_gender(gender_elem.attrib.get('code', '') if gender_elem is not None else '')
-
             age_elem = root.find('.//hl7:code[@displayName="age"]/../hl7:value', ns)
             age = ""
             if age_elem is not None:
@@ -496,15 +354,11 @@ with tab1:
                     if subj_id_elem is not None:
                         suspect_ids.append(subj_id_elem.attrib.get('root', ''))
 
-            # Product/detail build and launch/validity checks
+            # Product/detail build (without validity checks)
             product_details_list = []
             case_has_category2 = False
 
-            # For validity
-            case_non_valid_reasons = []
-            case_valid = True
-
-            # Collect all relevant dates to compare with launch
+            # Collect dates (still used for event rendering only)
             case_drug_dates = []   # tuples (product_key, start_date, stop_date)
             case_event_dates = []  # tuples ("event", event_start, event_stop)
 
@@ -530,9 +384,8 @@ with tab1:
                             raw_drug_text = alt_name.text.strip()
 
                     matched_company_prod = contains_company_product(raw_drug_text, company_products)
-
                     if matched_company_prod:
-                        # Category 2 flag
+                        # Category 2 flag (for reportability only)
                         if normalize_text(matched_company_prod) in category2_products:
                             case_has_category2 = True
 
@@ -543,7 +396,7 @@ with tab1:
                         dose_unit = dose_elem.attrib.get('unit', '') if dose_elem is not None else ''
                         strength_mg = extract_strength_mg(raw_drug_text, dose_val, dose_unit)
 
-                        # Dates (drug start/stop)
+                        # Dates (drug start/stop) – kept for display context
                         start_elem = drug.find('.//hl7:low', ns)
                         stop_elem = drug.find('.//hl7:high', ns)
                         start_date_str = start_elem.attrib.get('value', '') if start_elem is not None else ''
@@ -553,21 +406,6 @@ with tab1:
                         start_date_obj = parse_date_obj(start_date_str)
                         stop_date_obj = parse_date_obj(stop_date_str)
                         case_drug_dates.append((matched_company_prod, start_date_obj, stop_date_obj))
-
-                        # Launch resolution & validity checks for each drug
-                        launched, launch_date, reason = resolve_launch(matched_company_prod, strength_mg)
-                        if not launched:
-                            case_valid = False
-                            case_non_valid_reasons.append("Product not Lunched")
-
-                        # If launched with known date, compare drug dates
-                        if launch_date:
-                            if start_date_obj and start_date_obj < launch_date:
-                                case_valid = False
-                                case_non_valid_reasons.append("Drug exposure prior to Lunch")
-                            if stop_date_obj and stop_date_obj < launch_date:
-                                case_valid = False
-                                case_non_valid_reasons.append("Drug exposure prior to Lunch")
 
                         # Product detail parts
                         parts = []
@@ -602,7 +440,6 @@ with tab1:
                     value_elem = reaction.find('hl7:value', ns)
                     llt_code = value_elem.attrib.get('code', '') if value_elem is not None else ''
                     llt_term, pt_term = llt_code, ''
-
                     if mapping_df is not None and llt_code:
                         try:
                             llt_code_str = str(llt_code).strip()
@@ -657,62 +494,17 @@ with tab1:
 
             event_details_combined_display = "\n".join(event_details_list)
 
-            # --- Reportability ---
+            # --- Reportability (kept) ---
             if case_has_serious_event and case_has_category2:
                 reportability = "Category 2, serious, reportable case"
             else:
                 reportability = "Non-Reportable"
 
-            # --- Validity assessment (two reasons only) ---
-            # Compare event/drug dates against launch dates:
-            matched_launch_dates = []
-            for prod, sdt, edt in case_drug_dates:
-                launched, launch_dt, reason = resolve_launch(prod, None)  # strength handled earlier
-                if not launched:
-                    case_valid = False
-                    case_non_valid_reasons.append("Product not Lunched")
-                if launch_dt:
-                    matched_launch_dates.append(launch_dt)
-
-            if matched_launch_dates:
-                min_launch_dt = min(matched_launch_dates)
-                # Event dates
-                for _, evt_start, evt_stop in case_event_dates:
-                    if evt_start and evt_start < min_launch_dt:
-                        case_valid = False
-                        case_non_valid_reasons.append("Drug exposure prior to Lunch")
-                    if evt_stop and evt_stop < min_launch_dt:
-                        case_valid = False
-                        case_non_valid_reasons.append("Drug exposure prior to Lunch")
-                # Drug dates (in addition to per-drug check above, ensure global rule too)
-                for _, drug_start, drug_stop in case_drug_dates:
-                    if drug_start and drug_start < min_launch_dt:
-                        case_valid = False
-                        case_non_valid_reasons.append("Drug exposure prior to Lunch")
-                    if drug_stop and drug_stop < min_launch_dt:
-                        case_valid = False
-                        case_non_valid_reasons.append("Drug exposure prior to Lunch")
-
-            validity_value = "Valid" if case_valid else "Non-Valid"
-
-            # Enforce only your two reasons; dedupe
-            allowed_reasons = {"Product not Lunched", "Drug exposure prior to Lunch"}
-            selected_reasons = sorted(
-                set(r for r in case_non_valid_reasons if r in allowed_reasons),
-                key=lambda r: reason_priority.get(r, 99)
-            )
-            non_valid_reason = "; ".join(selected_reasons) if selected_reasons else ""
-
-            # Validity codes (from mapping or defaults), ordered by priority
-            validity_codes = "; ".join(
-                [validity_code_map.get(r, "") for r in selected_reasons if validity_code_map.get(r, "")]
-            )
-
             # Narrative (full text, no truncation)
             narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
             narrative_full = narrative_elem.text if narrative_elem is not None else ''
 
-            # Collect row
+            # Collect row (Validity columns removed)
             all_rows_display.append({
                 'SL No': idx,
                 'Date': current_date,
@@ -724,9 +516,6 @@ with tab1:
                 'Event Details': event_details_combined_display,
                 'Narrative': narrative_full,
                 'Reportability': reportability,
-                'Validity': validity_value,
-                'Non-Valid Reason': non_valid_reason,
-                'Validity Code': validity_codes,     # <-- NEW
                 'Listedness': '',
                 'App Assessment': '',
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
@@ -736,9 +525,7 @@ with tab1:
 
         st.success(f"Parsing complete ✅ — Files processed: {total_files}, Rows created: {parsed_rows}")
 
-# -----------------------------------------------------
-# Export & Edit tab
-# -----------------------------------------------------
+# --- Export & Edit tab ---
 with tab2:
     st.markdown("### 📋 Parsed Data Table 🧾")
     if all_rows_display:
@@ -762,7 +549,6 @@ with tab2:
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
             edited_df.to_excel(writer, index=False, sheet_name="Parsed Data")
-
         st.download_button("⬇️ Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
     else:
         st.info("No data available yet. Please upload files in the first tab.")
@@ -771,6 +557,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
