@@ -15,6 +15,7 @@ st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 # --- Version header ---
 # Baseline v1.0 (do-not-modify core behaviors)
 # v1.1: Add Validity assessment + replace st.experimental_rerun() with st.rerun()
+# v1.2: Extend Validity assessment with "Product not Launched" rule
 
 # --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
@@ -271,7 +272,7 @@ def get_launch_date(product_name: str, strength_mg) -> date | None:
     Rules:
     - 'launched' -> return date if present (else None)
     - 'launched_by_strength' -> return date only if strength provided and matches
-    - 'yet'/'awaited' -> return None (per your spec, we do not invalidate on 'not launched')
+    - 'yet'/'awaited' -> return None (per your spec, we do not invalidate on 'not launched' via dates)
     - unknown product -> None
     """
     key = normalize_text(product_name)
@@ -283,11 +284,18 @@ def get_launch_date(product_name: str, strength_mg) -> date | None:
         return payload  # may be None
     if status == "launched_by_strength":
         if strength_mg is not None and isinstance(payload, dict):
-            # keys in payload are floats; accept exact match
             return payload.get(strength_mg)
         return None
     # 'yet' or 'awaited'
     return None
+
+def get_launch_status(product_name: str) -> str | None:
+    """Return 'launched', 'launched_by_strength', 'yet', 'awaited' or None if unknown."""
+    key = normalize_text(product_name)
+    info = LAUNCH_INFO.get(key)
+    if not info:
+        return None
+    return info[0]
 
 # --- Upload & Parse tab ---
 with tab1:
@@ -629,12 +637,20 @@ with tab1:
             else:
                 reportability = "Non-Reportable"
 
-            # --- Validity assessment (single reason only, per your spec) ---
+            # --- Validity assessment (single reason only, ordered rules) ---
             validity_reason = None
 
             # Rule 1: No patient details
             if not has_any_patient_detail:
                 validity_reason = "No patient details"
+
+            # Rule 3: Product not Launched (apply before date comparison rule)
+            if validity_reason is None:
+                for prod, strength_mg, sdt, edt in case_drug_dates:
+                    status = get_launch_status(prod)
+                    if status in ("yet", "awaited"):
+                        validity_reason = "Product not Launched"
+                        break
 
             # Rule 2: Any event/drug dates prior to launch date
             if validity_reason is None:
@@ -720,14 +736,3 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
-
-
-
-
-
-
-
-
-
-
-
