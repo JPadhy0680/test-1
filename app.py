@@ -21,6 +21,7 @@ st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 # v1.4: Lot number detection — comment-only flags when lot text contains competitor/company names; numeric/alphanumeric lots considered valid
 # v1.4.2: If any comment is present, override Validity to "Kindly check comment and assess validity manually"
 # v1.4.3: Reflect MAH name in product section and mark Non-Valid (Non-company product) when MAH != Celix
+# v1.4.4: Clear Inputs preserves auth & resets uploaders (Option A)
 
 # --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
@@ -59,8 +60,12 @@ with st.expander("📖 Instructions"):
 - Only **one Excel** download button is provided (no CSV/HTML/Summary).
 """)
 
-# --- Tabs ---
+# --- Tabs & global session defaults ---
 tab1, tab2 = st.tabs(["Upload & Parse", "Export & Edit"])
+# v1.4.4: version key to rebuild uploaders when clearing inputs
+if "uploader_version" not in st.session_state:
+    st.session_state["uploader_version"] = 0
+
 all_rows_display = []
 current_date = datetime.now().strftime("%d-%b-%Y")
 
@@ -365,21 +370,46 @@ def get_mah_name_for_drug(drug_elem, root, ns) -> str:
 # --- Upload & Parse tab ---
 with tab1:
     st.markdown("### 🔎 Upload Files 🗂️")
-    if st.button("Clear Inputs", help="Click to clear all uploaded files and reset the app."):
-        st.session_state.clear()
-        st.rerun()  # FIX: replace deprecated st.experimental_rerun()
+
+    # v1.4.4: Clear Inputs (Option A) — preserve auth & reset uploaders
+    if st.button("Clear Inputs", help="Clear uploaded XMLs and parsed data (keep access)."):
+        # Preserve authentication expiry
+        auth_exp = st.session_state.get("auth_expires")
+
+        # Remove ONLY app data keys you may have added later (safe pops)
+        for k in [
+            "df_display",      # table snapshot
+            "edited_df",       # data_editor snapshot
+            # add other app-specific session keys here if you introduce them
+        ]:
+            st.session_state.pop(k, None)
+
+        # Rebuild upload widgets by bumping the versioned keys
+        st.session_state["uploader_version"] = st.session_state.get("uploader_version", 0) + 1
+
+        # Restore auth
+        if auth_exp:
+            st.session_state["auth_expires"] = auth_exp
+
+        # Rerun without logging out
+        st.rerun()
+
+    # Use versioned keys so bumping 'uploader_version' clears selected files
+    ver = st.session_state.get("uploader_version", 0)
 
     uploaded_files = st.file_uploader(
         "Upload E2B XML files",
         type=["xml"],
         accept_multiple_files=True,
-        help="Upload one or more E2B XML files for parsing."
+        help="Upload one or more E2B XML files for parsing.",
+        key=f"xml_uploader_{ver}"
     )
 
     mapping_file = st.file_uploader(
         "Upload LLT-PT Mapping Excel file",
         type=["xlsx"],
-        help="Upload the MedDRA LLT-PT mapping Excel file."
+        help="Upload the MedDRA LLT-PT mapping Excel file.",
+        key=f"map_uploader_{ver}"
     )
 
     # Optional: Upload a competitor name list (Excel with column 'Company Identifiers')
@@ -387,7 +417,8 @@ with tab1:
     comp_file = st.file_uploader(
         "Upload Competitor Identifiers (Excel)",
         type=["xlsx"],
-        help="Optional: Provide competitor/company names (one per row under 'Company Identifiers')."
+        help="Optional: Provide competitor/company names (one per row under 'Company Identifiers').",
+        key=f"comp_uploader_{ver}"
     )
     if comp_file:
         try:
@@ -803,7 +834,7 @@ with tab1:
             narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
             narrative_full = clean_value(narrative_full_raw)
 
-            # --- v1.4.2 OVERRIDE (refined in v1.4.3):
+            # --- v1.4.2 OVERRIDE (refined):
             # If any comments exist AND no invalid reason was set, force manual validity review.
             if comments and validity_reason is None:
                 validity_value = "Kindly check comment and assess validity manually"
@@ -863,6 +894,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
