@@ -20,6 +20,7 @@ st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 # v1.3.1: Patch 1 — strength-gated products use earliest strength launch date if strength is unknown
 # v1.4: Lot number detection — comment-only flags when lot text contains competitor/company names; numeric/alphanumeric lots considered valid
 # v1.4.2: If any comment is present, override Validity to "Kindly check comment and assess validity manually"
+# v1.4.3: Reflect MAH name in product section and mark Non-Valid (Non-company product) when MAH != Celix
 
 # --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
@@ -347,6 +348,20 @@ def contains_competitor_name(lot_text: str, competitor_names: set[str]) -> bool:
             return True
     return False
 
+# --- NEW (v1.4.3): MAH extraction helper ---
+def get_mah_name_for_drug(drug_elem, root, ns) -> str:
+    """
+    Try to obtain MAH name from the drug node; if not present, fall back to case-level playingOrganization.
+    """
+    mah_local = drug_elem.find('.//hl7:playingOrganization/hl7:name', ns)
+    if mah_local is not None and mah_local.text and mah_local.text.strip():
+        return mah_local.text.strip()
+    # Fallback: any case-level playingOrganization name
+    mah_global = root.find('.//hl7:playingOrganization/hl7:name', ns)
+    if mah_global is not None and mah_global.text and mah_global.text.strip():
+        return mah_global.text.strip()
+    return ""
+
 # --- Upload & Parse tab ---
 with tab1:
     st.markdown("### 🔎 Upload Files 🗂️")
@@ -407,8 +422,7 @@ with tab1:
 
         for idx, uploaded_file in enumerate(uploaded_files, start=1):
             warnings = []  # per-file warnings
-            comments = []  # v1.3+: per-file comments (PL messages, lot messages)
-
+            comments = []  # PL, lot, MAH messages
             try:
                 tree = ET.parse(uploaded_file)
                 root = tree.getroot()
@@ -501,7 +515,6 @@ with tab1:
                     age_group = age_group_map[code_val]
                 elif null_flavor in ["MSK", "UNK", "ASKU", "NI"] or code_val in ["MSK", "UNK", "ASKU", "NI"]:
                     age_group = "[Masked/Unknown]"
-            # Hide unknowns
             age_group = clean_value(age_group)
 
             # Patient Detail (skip unknown/empty values)
@@ -534,9 +547,10 @@ with tab1:
             product_details_list = []
             case_has_category2 = False
 
-            # Collect dates for validity checks
-            case_drug_dates = []   # tuples (product_key, strength_mg, start_date_obj, stop_date_obj)
-            case_event_dates = []  # tuples ("event", evt_start_obj, evt_stop_obj)
+            # Collect dates and MAH names for validity checks
+            case_drug_dates = []       # tuples (product_key, strength_mg, start_date_obj, stop_date_obj)
+            case_event_dates = []      # tuples ("event", evt_start_obj, evt_stop_obj)
+            case_mah_names = set()     # collect MAH names seen
 
             for drug in root.findall('.//hl7:substanceAdministration', ns):
                 id_elem = drug.find('.//hl7:id', ns)
@@ -586,6 +600,12 @@ with tab1:
 
                         case_drug_dates.append((matched_company_prod, strength_mg, start_date_obj, stop_date_obj))
 
+                        # --- MAH name (local or global) ---
+                        mah_name_raw = get_mah_name_for_drug(drug, root, ns)
+                        mah_name_clean = clean_value(mah_name_raw)
+                        if mah_name_clean:
+                            case_mah_names.add(mah_name_clean)
+
                         # Product detail parts (skip unknowns)
                         parts = []
                         display_name = raw_drug_text if raw_drug_text else matched_company_prod.title()
@@ -626,6 +646,10 @@ with tab1:
                             if lot_clean:
                                 parts.append(f"Lot No: {lot_clean}")
 
+                        # --- Reflect MAH in product section ---
+                        if mah_name_clean:
+                            parts.append(f"MAH: {mah_name_clean}")
+
                         # --- v1.3: PL detection -> add comments
                         pl_hits = set()
                         for t in [display_name, text_clean, form_clean, lot_clean]:
@@ -640,6 +664,10 @@ with tab1:
                         # --- v1.4: Lot detection -> add comments when lot contains competitor/company names
                         if lot_clean and contains_competitor_name(lot_clean, competitor_names):
                             comments.append(f"Lot number '{lot_clean}' may belong to another company — please verify.")
+
+                        # --- v1.4.3: MAH differs from Celix -> add comment
+                        if mah_name_clean and MY_COMPANY_NAME.lower() not in mah_name_clean.lower():
+                            comments.append(f"MAH '{mah_name_clean}' differs from Celix — please verify.")
 
                         # Only add this drug block if at least one displayable part remains
                         if parts:
@@ -731,6 +759,12 @@ with tab1:
             if not has_any_patient_detail:
                 validity_reason = "No patient details"
 
+            # Rule 1a (v1.4.3): MAH differs from Celix -> Non-company product
+            if validity_reason is None:
+                # If any MAH name present and doesn't contain 'celix', mark non-company
+                if any(name and MY_COMPANY_NAME.lower() not in name.lower() for name in case_mah_names):
+                    validity_reason = "Non-company product"
+
             # Rule 3: Product not Launched (apply before date comparison rule)
             if validity_reason is None:
                 for prod, strength_mg, sdt, edt in case_drug_dates:
@@ -769,8 +803,9 @@ with tab1:
             narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
             narrative_full = clean_value(narrative_full_raw)
 
-            # --- v1.4.2 OVERRIDE: if any comments exist, force manual validity review ---
-            if comments:  # any comment message present
+            # --- v1.4.2 OVERRIDE (refined in v1.4.3):
+            # If any comments exist AND no invalid reason was set, force manual validity review.
+            if comments and validity_reason is None:
                 validity_value = "Kindly check comment and assess validity manually"
 
             # Collect row (add Comment column)
@@ -788,7 +823,7 @@ with tab1:
                 'Validity': validity_value,
                 'Listedness': '',
                 'App Assessment': '',
-                'Comment': "; ".join(sorted(set(comments))),  # PL & lot messages (and future ones)
+                'Comment': "; ".join(sorted(set(comments))),  # PL, lot, MAH messages
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
             })
             parsed_rows += 1
@@ -828,6 +863,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
