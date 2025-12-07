@@ -549,9 +549,9 @@ with tab1:
                                 pl_hits.add(pl)
                         for pl in sorted(pl_hits):
                             if display_name:
-                                comments.append(f"plz check product name as {display_name} {pl} given")
+                                comments.append(f"Please check product name as {display_name} {pl} given")
                             else:
-                                comments.append(f"plz check product name: {pl} given")
+                                comments.append(f"Please check product name: {pl} given")
 
                         if lot_clean and contains_competitor_name(lot_clean, competitor_names):
                             comments.append(f"Lot number '{lot_clean}' may belong to another company — please verify.")
