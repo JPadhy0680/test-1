@@ -137,6 +137,22 @@ def map_outcome(code):
 # Age unit mapping: a=year, b=month
 age_unit_map = {"a": "year", "b": "month"}
 
+# --- NEW: Unknown handling helpers ---
+UNKNOWN_TOKENS = {"unk", "asku", "unknown"}  # lower-cased tokens
+
+def is_unknown(value: str) -> bool:
+    """Return True if value is one of UNK/ASKU/Unknown (case-insensitive, trimmed)."""
+    if value is None:
+        return True
+    v = str(value).strip()
+    if not v:
+        return True
+    return v.lower() in UNKNOWN_TOKENS
+
+def clean_value(value: str) -> str:
+    """Return empty string if value is unknown; otherwise return the original value."""
+    return "" if is_unknown(value) else str(value)
+
 # Normalization + inclusive matching
 def normalize_text(s: str) -> str:
     s = (s or "").lower()
@@ -180,7 +196,7 @@ def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
                 pass
     return None
 
-# Product portfolio (kept for matching/category only; no validity checks)
+# Product portfolio (kept for matching/category only)
 company_products = [
     "abiraterone", "apixaban", "apremilast", "bexarotene",
     "clobazam", "clonazepam", "cyanocobalamin", "dabigatran",
@@ -188,7 +204,7 @@ company_products = [
     "fesoterodine", "icatibant", "itraconazole", "linagliptin",
     "linagliptin + metformin", "nintedanib", "pirfenidone",
     "raltegravir", "ranolazine", "rivaroxaban", "saxagliptin",
-    "sitagliptin", "tamsulosin + solifenacin", "tapentadol",
+    "sitagagliptin", "tamsulosin + solifenacin", "tapentadol",
     "ticagrelor", "tamsulosin", "solifenacin",
     "cyclogest", "progesterone", "luteum", "amelgen"
 ]
@@ -256,45 +272,65 @@ with tab1:
 
             # Sender & Transmission
             sender_elem = root.find('.//hl7:id[@root="2.16.840.1.113883.3.989.2.1.3.1"]', ns)
-            sender_id = sender_elem.attrib.get('extension', '') if sender_elem is not None else ''
+            sender_id = clean_value(sender_elem.attrib.get('extension', '') if sender_elem is not None else '')
             creation_elem = root.find('.//hl7:creationTime', ns)
-            transmission_date = format_date(creation_elem.attrib.get('value', '') if creation_elem is not None else '')
+            transmission_date = clean_value(format_date(creation_elem.attrib.get('value', '') if creation_elem is not None else ''))
 
             # Reporter qualification
             reporter_elem = root.find('.//hl7:asQualifiedEntity/hl7:code', ns)
-            reporter_qualification = map_reporter(reporter_elem.attrib.get('code', '') if reporter_elem is not None else '')
+            reporter_qualification = clean_value(map_reporter(reporter_elem.attrib.get('code', '') if reporter_elem is not None else ''))
 
             # Patient demographics
             gender_elem = root.find('.//hl7:administrativeGenderCode', ns)
-            gender = map_gender(gender_elem.attrib.get('code', '') if gender_elem is not None else '')
+            gender_mapped = map_gender(gender_elem.attrib.get('code', '') if gender_elem is not None else '')
+            gender = clean_value(gender_mapped)
+
             age_elem = root.find('.//hl7:code[@displayName="age"]/../hl7:value', ns)
             age = ""
             if age_elem is not None:
                 age_val = age_elem.attrib.get('value', '')
                 raw_unit = age_elem.attrib.get('unit', '')  # 'a' or 'b'
                 unit_text = age_unit_map.get(raw_unit, raw_unit)
+
+                # Clean unknown age value and unit
+                age_val = clean_value(age_val)
+                unit_text_disp = clean_value(unit_text)
+
                 if age_val:
+                    # display only if value is not unknown
                     try:
+                        # pluralization still ok; if numeric parse fails, keep unit as-is
                         n = float(age_val)
-                        if unit_text in ("year", "month"):
-                            unit_text_disp = unit_text + ("s" if n != 1 else "")
-                        else:
-                            unit_text_disp = unit_text
+                        if unit_text_disp in ("year", "month"):
+                            unit_text_disp = unit_text_disp + ("s" if n != 1 else "")
                     except Exception:
-                        unit_text_disp = unit_text
-                    age = f"{age_val} {unit_text_disp}".strip()
+                        pass
+                    # if unit is unknown or empty, just show the number
+                    if unit_text_disp:
+                        age = f"{age_val} {unit_text_disp}".strip()
+                    else:
+                        age = f"{age_val}".strip()
 
             weight_elem = root.find('.//hl7:code[@displayName="bodyWeight"]/../hl7:value', ns)
-            weight = f"{weight_elem.attrib.get('value', '')} {weight_elem.attrib.get('unit', '')}" if weight_elem is not None else ''
+            weight_val = clean_value(weight_elem.attrib.get('value', '') if weight_elem is not None else '')
+            weight_unit = clean_value(weight_elem.attrib.get('unit', '') if weight_elem is not None else '')
+            weight = ""
+            if weight_val:
+                weight = f"{weight_val}" + (f" {weight_unit}" if weight_unit else "")
+
             height_elem = root.find('.//hl7:code[@displayName="height"]/../hl7:value', ns)
-            height = f"{height_elem.attrib.get('value', '')} {height_elem.attrib.get('unit', '')}" if height_elem is not None else ''
+            height_val = clean_value(height_elem.attrib.get('value', '') if height_elem is not None else '')
+            height_unit = clean_value(height_elem.attrib.get('unit', '') if height_elem is not None else '')
+            height = ""
+            if height_val:
+                height = f"{height_val}" + (f" {height_unit}" if height_unit else "")
 
             # Patient initials
             patient_initials = ""
             name_elem = root.find('.//hl7:player1/hl7:name', ns)
             if name_elem is not None:
                 if 'nullFlavor' in name_elem.attrib and name_elem.attrib.get('nullFlavor') == 'MSK':
-                    patient_initials = "Masked"
+                    patient_initials = "Masked"  # not treated as unknown
                 else:
                     init_parts = []
                     for g in name_elem.findall('hl7:given', ns):
@@ -308,6 +344,7 @@ with tab1:
                     else:
                         if name_elem.text and name_elem.text.strip():
                             patient_initials = name_elem.text.strip()
+            patient_initials = clean_value(patient_initials)
 
             # Age group
             age_group_map = {
@@ -328,8 +365,9 @@ with tab1:
                     age_group = age_group_map[code_val]
                 elif null_flavor in ["MSK", "UNK", "ASKU", "NI"] or code_val in ["MSK", "UNK", "ASKU", "NI"]:
                     age_group = "[Masked/Unknown]"
+            age_group = clean_value(age_group)  # will hide "Unknown" but keep "[Masked/Unknown]"? -> becomes empty (since contains "Unknown"). If you want to keep it, remove this line.
 
-            # Patient Detail
+            # Patient Detail (skip unknown/empty values)
             patient_parts = []
             if patient_initials:
                 patient_parts.append(f"Initials: {patient_initials}")
@@ -392,8 +430,10 @@ with tab1:
                         # Dose/strength parsing
                         text_elem = drug.find('.//hl7:text', ns)
                         dose_elem = drug.find('.//hl7:doseQuantity', ns)
-                        dose_val = dose_elem.attrib.get('value', '') if dose_elem is not None else ''
-                        dose_unit = dose_elem.attrib.get('unit', '') if dose_elem is not None else ''
+                        dose_val_raw = dose_elem.attrib.get('value', '') if dose_elem is not None else ''
+                        dose_unit_raw = dose_elem.attrib.get('unit', '') if dose_elem is not None else ''
+                        dose_val = clean_value(dose_val_raw)
+                        dose_unit = clean_value(dose_unit_raw)
                         strength_mg = extract_strength_mg(raw_drug_text, dose_val, dose_unit)
 
                         # Dates (drug start/stop) – kept for display context
@@ -401,30 +441,50 @@ with tab1:
                         stop_elem = drug.find('.//hl7:high', ns)
                         start_date_str = start_elem.attrib.get('value', '') if start_elem is not None else ''
                         stop_date_str = stop_elem.attrib.get('value', '') if stop_elem is not None else ''
-                        start_date_disp = format_date(start_date_str)
-                        stop_date_disp = format_date(stop_date_str)
+                        start_date_disp = clean_value(format_date(start_date_str))
+                        stop_date_disp = clean_value(format_date(stop_date_str))
                         start_date_obj = parse_date_obj(start_date_str)
                         stop_date_obj = parse_date_obj(stop_date_str)
                         case_drug_dates.append((matched_company_prod, start_date_obj, stop_date_obj))
 
-                        # Product detail parts
+                        # Product detail parts (skip unknowns)
                         parts = []
                         display_name = raw_drug_text if raw_drug_text else matched_company_prod.title()
-                        parts.append(f"Drug: {display_name}")
+                        display_name = clean_value(display_name)
+                        if display_name:
+                            parts.append(f"Drug: {display_name}")
+
                         if text_elem is not None and text_elem.text:
-                            parts.append(f"Dosage: {text_elem.text}")
-                        if dose_elem is not None and (dose_val or dose_unit):
-                            parts.append(f"Dose: {dose_val} {dose_unit}")
+                            text_clean = clean_value(text_elem.text)
+                            if text_clean:
+                                parts.append(f"Dosage: {text_clean}")
+
+                        if (dose_val or dose_unit):
+                            if dose_val and dose_unit:
+                                parts.append(f"Dose: {dose_val} {dose_unit}")
+                            elif dose_val:
+                                parts.append(f"Dose: {dose_val}")
+                            elif dose_unit:
+                                parts.append(f"Dose Unit: {dose_unit}")
+
                         if start_date_disp:
                             parts.append(f"Start Date: {start_date_disp}")
                         if stop_date_disp:
                             parts.append(f"Stop Date: {stop_date_disp}")
+
                         form_elem = drug.find('.//hl7:formCode/hl7:originalText', ns)
                         if form_elem is not None and form_elem.text:
-                            parts.append(f"Formulation: {form_elem.text}")
+                            form_clean = clean_value(form_elem.text)
+                            if form_clean:
+                                parts.append(f"Formulation: {form_clean}")
+
                         lot_elem = drug.find('.//hl7:lotNumberText', ns)
                         if lot_elem is not None and lot_elem.text:
-                            parts.append(f"Lot No: {lot_elem.text}")
+                            lot_clean = clean_value(lot_elem.text)
+                            if lot_clean:
+                                parts.append(f"Lot No: {lot_clean}")
+
+                        # Only add this drug block if at least one displayable part remains
                         if parts:
                             product_details_list.append(" \n ".join(parts))
 
@@ -467,29 +527,38 @@ with tab1:
                     # Outcome
                     outcome_elem = reaction.find('.//hl7:code[@displayName="outcome"]/../hl7:value', ns)
                     outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
+                    outcome = clean_value(outcome)
 
                     # Event dates (effectiveTime low/high if present)
                     evt_low = reaction.find('.//hl7:effectiveTime/hl7:low', ns)
                     evt_high = reaction.find('.//hl7:effectiveTime/hl7:high', ns)
                     evt_low_str = evt_low.attrib.get('value', '') if evt_low is not None else ''
                     evt_high_str = evt_high.attrib.get('value', '') if evt_high is not None else ''
-                    evt_low_disp = format_date(evt_low_str)   # Display: Start
-                    evt_high_disp = format_date(evt_high_str) # Display: End
-                    evt_low_obj = parse_date_obj(evt_low_str) # Comparison: Start
-                    evt_high_obj = parse_date_obj(evt_high_str) # Comparison: End
+                    evt_low_disp = clean_value(format_date(evt_low_str))   # Display: Start
+                    evt_high_disp = clean_value(format_date(evt_high_str)) # Display: End
+                    evt_low_obj = parse_date_obj(evt_low_str)              # Comparison: Start
+                    evt_high_obj = parse_date_obj(evt_high_str)            # Comparison: End
                     case_event_dates.append(("event", evt_low_obj, evt_high_obj))
 
                     # Event section details — explicit Start/End labels
-                    details_parts = [
-                        f"Event {event_count}: {llt_term} ({pt_term})",
-                        f"Seriousness: {seriousness_display}",
-                        f"Outcome: {outcome}"
-                    ]
+                    details_parts = [f"Event {event_count}: {llt_term} ({pt_term})"]
+                    # Append conditionally to avoid showing unknowns
+                    seriousness_clean = clean_value(seriousness_display)
+                    if seriousness_clean:
+                        details_parts.append(f"Seriousness: {seriousness_clean}")
+                    if outcome:
+                        details_parts.append(f"Outcome: {outcome}")
                     if evt_low_disp:
                         details_parts.append(f"Event Start: {evt_low_disp}")
                     if evt_high_disp:
                         details_parts.append(f"Event End: {evt_high_disp}")
-                    event_details_list.append(" (" + "; ".join(details_parts[1:]) + ") " + details_parts[0])
+
+                    # Build line: keep the event header first, then metadata if present
+                    if len(details_parts) > 1:
+                        event_details_list.append(" (" + "; ".join(details_parts[1:]) + ") " + details_parts[0])
+                    else:
+                        event_details_list.append(details_parts[0])
+
                     event_count += 1
 
             event_details_combined_display = "\n".join(event_details_list)
@@ -502,7 +571,8 @@ with tab1:
 
             # Narrative (full text, no truncation)
             narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
-            narrative_full = narrative_elem.text if narrative_elem is not None else ''
+            narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
+            narrative_full = clean_value(narrative_full_raw)
 
             # Collect row (Validity columns removed)
             all_rows_display.append({
@@ -557,6 +627,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
