@@ -23,6 +23,7 @@ st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 # v1.4.3: Reflect MAH name in product section and mark Non-Valid (Non-company product) when MAH != Celix
 # v1.4.4: Clear Inputs preserves auth & resets uploaders (Option A)
 # v1.4.5: REMOVED competitor upload UI; finalized baseline
+# v1.4.6: Event Details formatting fix (semicolon-joined) + Case Age (days) next to Transmission Date
 
 # --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
@@ -63,7 +64,7 @@ with st.expander("📖 Instructions"):
 
 # --- Tabs & global session defaults ---
 tab1, tab2 = st.tabs(["Upload & Parse", "Export & Edit"])
-# v1.4.4+: version key to rebuild uploaders when clearing inputs
+# Versioned widget key to rebuild uploaders when clearing inputs
 if "uploader_version" not in st.session_state:
     st.session_state["uploader_version"] = 0
 
@@ -153,20 +154,16 @@ def map_outcome(code):
 # Age unit mapping: a=year, b=month
 age_unit_map = {"a": "year", "b": "month"}
 
-# --- Unknown handling helpers (baseline behavior retained) ---
+# Unknown handling helpers (baseline behavior retained)
 UNKNOWN_TOKENS = {"unk", "asku", "unknown"}  # lower-cased tokens
-
 def is_unknown(value: str) -> bool:
-    """Return True if value is one of UNK/ASKU/Unknown (case-insensitive, trimmed)."""
     if value is None:
         return True
     v = str(value).strip()
     if not v:
         return True
     return v.lower() in UNKNOWN_TOKENS
-
 def clean_value(value: str) -> str:
-    """Return empty string if value is unknown; otherwise return the original value."""
     return "" if is_unknown(value) else str(value)
 
 # Normalization + inclusive matching
@@ -187,22 +184,18 @@ def contains_company_product(text: str, company_products: list) -> str:
             return prod
     return ""
 
-# Robust strength (mg) extraction: supports "1,000 mg", "2.5 mg", case-insensitive
+# Strength extraction (mg)
 MG_PATTERN = re.compile(r"""
-    (\d{1,3}(?:,\d{3})*\d+(?:\.\d{1,3})?)  # numeric value, supports thousands and decimals
+    (\d{1,3}(?:,\d{3})*\d+(?:\.\d{1,3})?)
     \s*
-    mg\b                                  # mg unit, word boundary
+    mg\b
 """, re.IGNORECASE | re.VERBOSE)
-
 def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
-    """Try to extract strength in mg from raw text or doseQuantity."""
-    # Priority 1: doseQuantity unit mg
     if dose_val and dose_unit and dose_unit.lower() == "mg":
         try:
             return float(str(dose_val).replace(",", ""))
         except Exception:
             pass
-    # Priority 2: regex in raw text
     if raw_text:
         m = MG_PATTERN.search(raw_text or "")
         if m:
@@ -212,14 +205,12 @@ def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
                 pass
     return None
 
-# --- PL number extraction (PL, PLGB, PLNI) ---
+# PL number extraction (PL, PLGB, PLNI)
 PL_PATTERN = re.compile(
     r'\b(PL|PLGB|PLNI)\s*([0-9]{5})\s*/\s*([0-9]{4,5})\b',
     re.IGNORECASE
 )
-
 def extract_pl_numbers(text: str):
-    """Return list of normalized PL strings like 'PL 12345/0001' found in the text."""
     out = []
     if not text:
         return out
@@ -230,7 +221,7 @@ def extract_pl_numbers(text: str):
         out.append(f"{prefix} {company_code}/{product_code}")
     return out
 
-# Product portfolio (for matching & Category 2 flag only)
+# Product portfolio & Category 2
 company_products = [
     "abiraterone", "apixaban", "apremilast", "bexarotene",
     "clobazam", "clonazepam", "cyanocobalamin", "dabigatran",
@@ -242,7 +233,6 @@ company_products = [
     "ticagrelor", "tamsulosin", "solifenacin",
     "cyclogest", "progesterone", "luteum", "amelgen"
 ]
-
 category2_products = {
     "clobazam", "clonazepam", "cyanocobalamin",
     "famotidine", "itraconazole",
@@ -251,7 +241,7 @@ category2_products = {
     "progesterone", "luteum", "amelgen"
 }
 
-# --- Launch dates (for validity comparison) ---
+# Launch dates (for validity comparison)
 def parse_dd_mmm_yy(s):
     return datetime.strptime(s, "%d-%b-%y").date()
 
@@ -264,12 +254,13 @@ LAUNCH_INFO = {
     "clonazepam": ("launched", parse_dd_mmm_yy("20-Jan-25")),
     "cyanocobalamin": ("awaited", None),
     "dabigatran": ("yet", None),
-    "dapagliflozin": ("launched_by_strength", {10.0: parse_dd_mmm_yy("26-Aug-25"), 5.0: parse_dd_mmm_yy("10-Sep-25")}),
+    "dapagliflozin": ("launched_by_strength", {10.0: parse_dd_mmm_yy("26-Aug-25"),
+                                                5.0: parse_dd_mmm_yy("10-Sep-25")}),
     "dimethyl fumarate": ("launched", parse_dd_mmm_yy("05-Feb-24")),
     "famotidine": ("launched", parse_dd_mmm_yy("21-Feb-25")),
     "fesoterodine": ("yet", None),
     "icatibant": ("launched", parse_dd_mmm_yy("28-Jul-22")),
-    "itraconazole": ("awaited", None),  # treat as no launch date for validity rule
+    "itraconazole": ("awaited", None),
     "linagliptin": ("yet", None),
     "linagliptin + metformin": ("awaited", None),
     "nintedanib": ("awaited", None),
@@ -295,57 +286,41 @@ LAUNCH_INFO = {
     "amelgen": ("launched", None),
 }
 
-# --- PATCH 1: updated function with conservative fallback for strength-gated products ---
+# Strength-gated launch fallback: earliest strength date if strength unknown
 def get_launch_date(product_name: str, strength_mg) -> date | None:
-    """
-    Return the launch date for a matched company product.
-    - 'launched' -> return date if present (else None)
-    - 'launched_by_strength' -> return date only if strength provided and matches;
-      if strength is unknown, return the EARLIEST strength launch date (conservative fallback).
-    - 'yet'/'awaited' -> None
-    - unknown -> None
-    """
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
     if not info:
         return None
     status, payload = info
     if status == "launched":
-        return payload  # may be None
+        return payload
     if status == "launched_by_strength":
         if isinstance(payload, dict) and payload:
             if strength_mg is not None:
                 return payload.get(strength_mg)
-            return min(payload.values())  # earliest strength launch date
+            return min(payload.values())  # conservative fallback
         return None
     # 'yet' or 'awaited'
     return None
 
 def get_launch_status(product_name: str) -> str | None:
-    """Return 'launched', 'launched_by_strength', 'yet', 'awaited' or None if unknown."""
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
     if not info:
         return None
     return info[0]
 
-# --- v1.4: Company & lot detection helpers ---
+# Company & lot detection helpers
 MY_COMPANY_NAME = "celix"
-
 DEFAULT_COMPETITOR_NAMES = {
     "glenmark", "cipla", "sun pharma", "dr reddy", "dr. reddy",
     "torrent", "lupin", "intas", "mankind", "micro labs", "zydus"
 }
-
 def contains_competitor_name(lot_text: str, competitor_names: set[str]) -> bool:
-    """
-    Return True if lot_text contains any competitor/company name (case-insensitive).
-    Numeric/alphanumeric codes (e.g., 'A12345B') will not match unless they include a name.
-    """
     if not lot_text:
         return False
     norm = lot_text.lower()
-    # Do not flag if our own company name appears
     if MY_COMPANY_NAME.lower() in norm:
         return False
     for name in competitor_names:
@@ -354,15 +329,11 @@ def contains_competitor_name(lot_text: str, competitor_names: set[str]) -> bool:
             return True
     return False
 
-# --- MAH extraction helper ---
+# MAH extraction helper
 def get_mah_name_for_drug(drug_elem, root, ns) -> str:
-    """
-    Try to obtain MAH name from the drug node; if not present, fall back to case-level playingOrganization.
-    """
     mah_local = drug_elem.find('.//hl7:playingOrganization/hl7:name', ns)
     if mah_local is not None and mah_local.text and mah_local.text.strip():
         return mah_local.text.strip()
-    # Fallback: any case-level playingOrganization name
     mah_global = root.find('.//hl7:playingOrganization/hl7:name', ns)
     if mah_global is not None and mah_global.text and mah_global.text.strip():
         return mah_global.text.strip()
@@ -372,30 +343,21 @@ def get_mah_name_for_drug(drug_elem, root, ns) -> str:
 with tab1:
     st.markdown("### 🔎 Upload Files 🗂️")
 
-    # v1.4.4+: Clear Inputs (Option A) — preserve auth & reset uploaders
+    # Clear Inputs — preserve auth & reset uploaders
     if st.button("Clear Inputs", help="Clear uploaded XMLs and parsed data (keep access)."):
-        # Preserve authentication expiry
         auth_exp = st.session_state.get("auth_expires")
 
-        # Remove ONLY app data keys you may have added later (safe pops)
-        for k in [
-            "df_display",      # table snapshot
-            "edited_df",       # data_editor snapshot
-            # add other app-specific session keys here if you introduce them
-        ]:
+        # Remove ONLY app-data keys if used in future
+        for k in ["df_display", "edited_df"]:
             st.session_state.pop(k, None)
 
-        # Rebuild upload widgets by bumping the versioned keys
+        # Rebuild upload widgets by bumping versioned keys
         st.session_state["uploader_version"] = st.session_state.get("uploader_version", 0) + 1
 
-        # Restore auth
         if auth_exp:
             st.session_state["auth_expires"] = auth_exp
-
-        # Rerun without logging out
         st.rerun()
 
-    # Use versioned keys so bumping 'uploader_version' clears selected files
     ver = st.session_state.get("uploader_version", 0)
 
     uploaded_files = st.file_uploader(
@@ -413,7 +375,7 @@ with tab1:
         key=f"map_uploader_{ver}"
     )
 
-    # NOTE: Competitor upload UI removed in v1.4.5. Using DEFAULT_COMPETITOR_NAMES.
+    # Competitor upload UI removed — use defaults
     competitor_names = set(DEFAULT_COMPETITOR_NAMES)
 
     mapping_df = None
@@ -438,8 +400,8 @@ with tab1:
         parsed_rows = 0
 
         for idx, uploaded_file in enumerate(uploaded_files, start=1):
-            warnings = []  # per-file warnings
-            comments = []  # PL, lot, MAH messages
+            warnings = []
+            comments = []
             try:
                 tree = ET.parse(uploaded_file)
                 root = tree.getroot()
@@ -453,8 +415,21 @@ with tab1:
             # Sender & Transmission
             sender_elem = root.find('.//hl7:id[@root="2.16.840.1.113883.3.989.2.1.3.1"]', ns)
             sender_id = clean_value(sender_elem.attrib.get('extension', '') if sender_elem is not None else '')
+
             creation_elem = root.find('.//hl7:creationTime', ns)
-            transmission_date = clean_value(format_date(creation_elem.attrib.get('value', '') if creation_elem is not None else ''))
+            creation_raw = creation_elem.attrib.get('value', '') if creation_elem is not None else ''
+            transmission_date = clean_value(format_date(creation_raw))     # display string
+            transmission_date_obj = parse_date_obj(creation_raw)           # date object for age calc
+
+            # Case Age (days) = today - transmission date (Day 0)
+            case_age_days = ""
+            try:
+                if transmission_date_obj:
+                    case_age_days = (datetime.now().date() - transmission_date_obj).days
+                    if case_age_days < 0:
+                        case_age_days = 0
+            except Exception:
+                case_age_days = ""
 
             # Reporter qualification
             reporter_elem = root.find('.//hl7:asQualifiedEntity/hl7:code', ns)
@@ -469,7 +444,7 @@ with tab1:
             age = ""
             if age_elem is not None:
                 age_val = age_elem.attrib.get('value', '')
-                raw_unit = age_elem.attrib.get('unit', '')  # 'a' or 'b'
+                raw_unit = age_elem.attrib.get('unit', '')
                 unit_text = age_unit_map.get(raw_unit, raw_unit)
                 age_val = clean_value(age_val)
                 unit_text_disp = clean_value(unit_text)
@@ -497,7 +472,7 @@ with tab1:
             name_elem = root.find('.//hl7:player1/hl7:name', ns)
             if name_elem is not None:
                 if 'nullFlavor' in name_elem.attrib and name_elem.attrib.get('nullFlavor') == 'MSK':
-                    patient_initials = "Masked"  # not treated as unknown unless requested
+                    patient_initials = "Masked"
                 else:
                     init_parts = []
                     for g in name_elem.findall('hl7:given', ns):
@@ -515,13 +490,8 @@ with tab1:
 
             # Age group
             age_group_map = {
-                "0": "Foetus",
-                "1": "Neonate",
-                "2": "Infant",
-                "3": "Child",
-                "4": "Adolescent",
-                "5": "Adult",
-                "6": "Elderly"
+                "0": "Foetus", "1": "Neonate", "2": "Infant", "3": "Child",
+                "4": "Adolescent", "5": "Adult", "6": "Elderly"
             }
             age_group_elem = root.find('.//hl7:code[@displayName="ageGroup"]/../hl7:value', ns)
             age_group = ""
@@ -534,20 +504,14 @@ with tab1:
                     age_group = "[Masked/Unknown]"
             age_group = clean_value(age_group)
 
-            # Patient Detail (skip unknown/empty values)
+            # Patient Detail
             patient_parts = []
-            if patient_initials:
-                patient_parts.append(f"Initials: {patient_initials}")
-            if gender:
-                patient_parts.append(f"Gender: {gender}")
-            if age_group:
-                patient_parts.append(f"Age Group: {age_group}")
-            if age:
-                patient_parts.append(f"Age: {age}")
-            if height:
-                patient_parts.append(f"Height: {height}")
-            if weight:
-                patient_parts.append(f"Weight: {weight}")
+            if patient_initials: patient_parts.append(f"Initials: {patient_initials}")
+            if gender: patient_parts.append(f"Gender: {gender}")
+            if age_group: patient_parts.append(f"Age Group: {age_group}")
+            if age: patient_parts.append(f"Age: {age}")
+            if height: patient_parts.append(f"Height: {height}")
+            if weight: patient_parts.append(f"Weight: {weight}")
             patient_detail = ", ".join(patient_parts)
             has_any_patient_detail = any([patient_initials, gender, age_group, age, height, weight])
 
@@ -564,10 +528,10 @@ with tab1:
             product_details_list = []
             case_has_category2 = False
 
-            # Collect dates and MAH names for validity checks
-            case_drug_dates = []       # tuples (product_key, strength_mg, start_date_obj, stop_date_obj)
-            case_event_dates = []      # tuples ("event", evt_start_obj, evt_stop_obj)
-            case_mah_names = set()     # collect MAH names seen
+            # For validity checks
+            case_drug_dates = []       # (product_key, strength_mg, start_date_obj, stop_date_obj)
+            case_event_dates = []      # ("event", evt_start_obj, evt_stop_obj)
+            case_mah_names = set()     # MAH names encountered
 
             for drug in root.findall('.//hl7:substanceAdministration', ns):
                 id_elem = drug.find('.//hl7:id', ns)
@@ -617,7 +581,7 @@ with tab1:
 
                         case_drug_dates.append((matched_company_prod, strength_mg, start_date_obj, stop_date_obj))
 
-                        # --- MAH name (local or global) ---
+                        # MAH name (local or global)
                         mah_name_raw = get_mah_name_for_drug(drug, root, ns)
                         mah_name_clean = clean_value(mah_name_raw)
                         if mah_name_clean:
@@ -663,11 +627,11 @@ with tab1:
                             if lot_clean:
                                 parts.append(f"Lot No: {lot_clean}")
 
-                        # --- Reflect MAH in product section ---
+                        # Reflect MAH in product section
                         if mah_name_clean:
                             parts.append(f"MAH: {mah_name_clean}")
 
-                        # --- PL detection -> add comments
+                        # PL detection -> add comments
                         pl_hits = set()
                         for t in [display_name, text_clean, form_clean, lot_clean]:
                             for pl in extract_pl_numbers(t):
@@ -678,11 +642,11 @@ with tab1:
                             else:
                                 comments.append(f"plz check product name: {pl} given")
 
-                        # --- Lot detection -> add comments when lot contains competitor/company names
+                        # Lot detection -> add comments when lot contains competitor/company names
                         if lot_clean and contains_competitor_name(lot_clean, competitor_names):
                             comments.append(f"Lot number '{lot_clean}' may belong to another company — please verify.")
 
-                        # --- MAH differs from Celix -> add comment
+                        # MAH differs from Celix -> add comment
                         if mah_name_clean and MY_COMPANY_NAME.lower() not in mah_name_clean.lower():
                             comments.append(f"MAH '{mah_name_clean}' differs from Celix — please verify.")
 
@@ -731,22 +695,22 @@ with tab1:
                     outcome = map_outcome(outcome_elem.attrib.get('code', '') if outcome_elem is not None else '')
                     outcome = clean_value(outcome)
 
-                    # Event dates (effectiveTime low/high if present)
+                    # Event dates
                     evt_low = reaction.find('.//hl7:effectiveTime/hl7:low', ns)
                     evt_high = reaction.find('.//hl7:effectiveTime/hl7:high', ns)
                     evt_low_str = evt_low.attrib.get('value', '') if evt_low is not None else ''
                     evt_high_str = evt_high.attrib.get('value', '') if evt_high is not None else ''
-                    evt_low_disp = clean_value(format_date(evt_low_str))    # Display: Start
-                    evt_high_disp = clean_value(format_date(evt_high_str))  # Display: End
-                    evt_low_obj = parse_date_obj(evt_low_str)               # Comparison: Start
-                    evt_high_obj = parse_date_obj(evt_high_str)             # Comparison: End
+                    evt_low_disp = clean_value(format_date(evt_low_str))
+                    evt_high_disp = clean_value(format_date(evt_high_str))
+                    evt_low_obj = parse_date_obj(evt_low_str)
+                    evt_high_obj = parse_date_obj(evt_high_str)
                     case_event_dates.append(("event", evt_low_obj, evt_high_obj))
 
-                    # Event section details — explicit Start/End labels
-                    details_parts = [f"Event {event_count}: {llt_term} ({pt_term})"]
-                    seriousness_clean = clean_value(seriousness_display)
-                    if seriousness_clean:
-                        details_parts.append(f"Seriousness: {seriousness_clean}")
+                    # Event section details — NEW semicolon-joined format
+                    details_parts = [
+                        f"Event {event_count}: {llt_term} ({pt_term})",
+                        f"Seriousness: {seriousness_display}"
+                    ]
                     if outcome:
                         details_parts.append(f"Outcome: {outcome}")
                     if evt_low_disp:
@@ -754,22 +718,18 @@ with tab1:
                     if evt_high_disp:
                         details_parts.append(f"Event End: {evt_high_disp}")
 
-                    if len(details_parts) > 1:
-                        event_details_list.append(" (" + "; ".join(details_parts[1:]) + ") " + details_parts[0])
-                    else:
-                        event_details_list.append(details_parts[0])
-
+                    event_details_list.append("; ".join(details_parts))
                     event_count += 1
 
             event_details_combined_display = "\n".join(event_details_list)
 
-            # --- Reportability (kept from baseline) ---
+            # Reportability
             if case_has_serious_event and case_has_category2:
                 reportability = "Category 2, serious, reportable case"
             else:
                 reportability = "Non-Reportable"
 
-            # --- Validity assessment (single reason only, ordered rules) ---
+            # --- Validity assessment (ordered single reason) ---
             validity_reason = None
 
             # Rule 1: No patient details
@@ -781,7 +741,7 @@ with tab1:
                 if any(name and MY_COMPANY_NAME.lower() not in name.lower() for name in case_mah_names):
                     validity_reason = "Non-company product"
 
-            # Rule 3: Product not Launched (apply before date comparison rule)
+            # Rule 3: Product not Launched
             if validity_reason is None:
                 for prod, strength_mg, sdt, edt in case_drug_dates:
                     status = get_launch_status(prod)
@@ -814,22 +774,22 @@ with tab1:
 
             validity_value = f"Non-Valid ({validity_reason})" if validity_reason else "Valid"
 
-            # Narrative (full text, no truncation)
+            # Narrative (full text)
             narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
             narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
             narrative_full = clean_value(narrative_full_raw)
 
-            # --- Comment→Validity override:
-            # If any comments exist AND no invalid reason was set, force manual validity review.
+            # Comment→Validity override: if comments exist and no invalid reason was set
             if comments and validity_reason is None:
                 validity_value = "Kindly check comment and assess validity manually"
 
-            # Collect row (add Comment column)
+            # Collect row
             all_rows_display.append({
                 'SL No': idx,
                 'Date': current_date,
                 'Sender ID': sender_id,
                 'Transmission Date': transmission_date,
+                'Case Age (days)': case_age_days,  # NEW column next to Transmission Date
                 'Reporter Qualification': reporter_qualification,
                 'Patient Detail': patient_detail,
                 'Product Detail': " \n ".join(product_details_list),
@@ -839,7 +799,7 @@ with tab1:
                 'Validity': validity_value,
                 'Listedness': '',
                 'App Assessment': '',
-                'Comment': "; ".join(sorted(set(comments))),  # PL, lot, MAH messages
+                'Comment': "; ".join(sorted(set(comments))),
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
             })
             parsed_rows += 1
@@ -858,7 +818,7 @@ with tab2:
         if not show_full_narrative:
             df_display['Narrative'] = df_display['Narrative'].astype(str).str.slice(0, 1000)
 
-        editable_cols = ['Listedness', 'App Assessment']  # keep Comment & Validity read-only
+        editable_cols = ['Listedness', 'App Assessment']  # keep others read-only
         disabled_cols = [col for col in df_display.columns if col not in editable_cols]
 
         edited_df = st.data_editor(
@@ -879,6 +839,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
