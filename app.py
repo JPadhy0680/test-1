@@ -22,6 +22,7 @@ st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 # v1.4.2: If any comment is present, override Validity to "Kindly check comment and assess validity manually"
 # v1.4.3: Reflect MAH name in product section and mark Non-Valid (Non-company product) when MAH != Celix
 # v1.4.4: Clear Inputs preserves auth & resets uploaders (Option A)
+# v1.4.5: REMOVED competitor upload UI; finalized baseline
 
 # --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
@@ -62,7 +63,7 @@ with st.expander("📖 Instructions"):
 
 # --- Tabs & global session defaults ---
 tab1, tab2 = st.tabs(["Upload & Parse", "Export & Edit"])
-# v1.4.4: version key to rebuild uploaders when clearing inputs
+# v1.4.4+: version key to rebuild uploaders when clearing inputs
 if "uploader_version" not in st.session_state:
     st.session_state["uploader_version"] = 0
 
@@ -353,7 +354,7 @@ def contains_competitor_name(lot_text: str, competitor_names: set[str]) -> bool:
             return True
     return False
 
-# --- NEW (v1.4.3): MAH extraction helper ---
+# --- MAH extraction helper ---
 def get_mah_name_for_drug(drug_elem, root, ns) -> str:
     """
     Try to obtain MAH name from the drug node; if not present, fall back to case-level playingOrganization.
@@ -371,7 +372,7 @@ def get_mah_name_for_drug(drug_elem, root, ns) -> str:
 with tab1:
     st.markdown("### 🔎 Upload Files 🗂️")
 
-    # v1.4.4: Clear Inputs (Option A) — preserve auth & reset uploaders
+    # v1.4.4+: Clear Inputs (Option A) — preserve auth & reset uploaders
     if st.button("Clear Inputs", help="Clear uploaded XMLs and parsed data (keep access)."):
         # Preserve authentication expiry
         auth_exp = st.session_state.get("auth_expires")
@@ -412,23 +413,8 @@ with tab1:
         key=f"map_uploader_{ver}"
     )
 
-    # Optional: Upload a competitor name list (Excel with column 'Company Identifiers')
+    # NOTE: Competitor upload UI removed in v1.4.5. Using DEFAULT_COMPETITOR_NAMES.
     competitor_names = set(DEFAULT_COMPETITOR_NAMES)
-    comp_file = st.file_uploader(
-        "Upload Competitor Identifiers (Excel)",
-        type=["xlsx"],
-        help="Optional: Provide competitor/company names (one per row under 'Company Identifiers').",
-        key=f"comp_uploader_{ver}"
-    )
-    if comp_file:
-        try:
-            comp_df = pd.read_excel(comp_file, engine="openpyxl")
-            if "Company Identifiers" in comp_df.columns:
-                competitor_names = set(
-                    comp_df["Company Identifiers"].astype(str).str.lower().str.strip()
-                )
-        except Exception as e:
-            st.warning(f"Could not read competitor identifier file: {e}")
 
     mapping_df = None
     if mapping_file:
@@ -681,7 +667,7 @@ with tab1:
                         if mah_name_clean:
                             parts.append(f"MAH: {mah_name_clean}")
 
-                        # --- v1.3: PL detection -> add comments
+                        # --- PL detection -> add comments
                         pl_hits = set()
                         for t in [display_name, text_clean, form_clean, lot_clean]:
                             for pl in extract_pl_numbers(t):
@@ -692,11 +678,11 @@ with tab1:
                             else:
                                 comments.append(f"plz check product name: {pl} given")
 
-                        # --- v1.4: Lot detection -> add comments when lot contains competitor/company names
+                        # --- Lot detection -> add comments when lot contains competitor/company names
                         if lot_clean and contains_competitor_name(lot_clean, competitor_names):
                             comments.append(f"Lot number '{lot_clean}' may belong to another company — please verify.")
 
-                        # --- v1.4.3: MAH differs from Celix -> add comment
+                        # --- MAH differs from Celix -> add comment
                         if mah_name_clean and MY_COMPANY_NAME.lower() not in mah_name_clean.lower():
                             comments.append(f"MAH '{mah_name_clean}' differs from Celix — please verify.")
 
@@ -790,9 +776,8 @@ with tab1:
             if not has_any_patient_detail:
                 validity_reason = "No patient details"
 
-            # Rule 1a (v1.4.3): MAH differs from Celix -> Non-company product
+            # Rule 1a: MAH differs from Celix -> Non-company product
             if validity_reason is None:
-                # If any MAH name present and doesn't contain 'celix', mark non-company
                 if any(name and MY_COMPANY_NAME.lower() not in name.lower() for name in case_mah_names):
                     validity_reason = "Non-company product"
 
@@ -834,7 +819,7 @@ with tab1:
             narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
             narrative_full = clean_value(narrative_full_raw)
 
-            # --- v1.4.2 OVERRIDE (refined):
+            # --- Comment→Validity override:
             # If any comments exist AND no invalid reason was set, force manual validity review.
             if comments and validity_reason is None:
                 validity_value = "Kindly check comment and assess validity manually"
@@ -894,6 +879,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
