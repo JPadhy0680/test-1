@@ -2,15 +2,19 @@
 import streamlit as st
 import pandas as pd
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import io
 import re
-import calendar  # still used for date parsing (last-day-of-month)
+import calendar  # used for date parsing (last-day-of-month)
 
 # --- App configuration ---
 st.set_page_config(page_title="E2B_R3 XML Parser Application", layout="wide")
 st.markdown(""" """, unsafe_allow_html=True)
 st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
+
+# --- Version header ---
+# Baseline v1.0 (do-not-modify core behaviors)
+# v1.1: Add Validity assessment + replace st.experimental_rerun() with st.rerun()
 
 # --- Password with 24h persistence (uses st.secrets if present) ---
 def _get_password():
@@ -137,7 +141,7 @@ def map_outcome(code):
 # Age unit mapping: a=year, b=month
 age_unit_map = {"a": "year", "b": "month"}
 
-# --- NEW: Unknown handling helpers ---
+# --- Unknown handling helpers (baseline behavior retained) ---
 UNKNOWN_TOKENS = {"unk", "asku", "unknown"}  # lower-cased tokens
 
 def is_unknown(value: str) -> bool:
@@ -196,7 +200,7 @@ def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
                 pass
     return None
 
-# Product portfolio (kept for matching/category only)
+# Product portfolio (for matching & Category 2 flag only)
 company_products = [
     "abiraterone", "apixaban", "apremilast", "bexarotene",
     "clobazam", "clonazepam", "cyanocobalamin", "dabigatran",
@@ -204,7 +208,7 @@ company_products = [
     "fesoterodine", "icatibant", "itraconazole", "linagliptin",
     "linagliptin + metformin", "nintedanib", "pirfenidone",
     "raltegravir", "ranolazine", "rivaroxaban", "saxagliptin",
-    "sitagagliptin", "tamsulosin + solifenacin", "tapentadol",
+    "sitagliptin", "tamsulosin + solifenacin", "tapentadol",
     "ticagrelor", "tamsulosin", "solifenacin",
     "cyclogest", "progesterone", "luteum", "amelgen"
 ]
@@ -217,12 +221,80 @@ category2_products = {
     "progesterone", "luteum", "amelgen"
 }
 
+# --- Launch dates (for validity comparison) ---
+def parse_dd_mmm_yy(s):
+    return datetime.strptime(s, "%d-%b-%y").date()
+
+LAUNCH_INFO = {
+    "abiraterone": ("launched", parse_dd_mmm_yy("08-Sep-22")),
+    "apixaban": ("launched", parse_dd_mmm_yy("26-Feb-25")),
+    "apremilast": ("yet", None),
+    "bexarotene": ("launched", parse_dd_mmm_yy("19-Jan-23")),
+    "clobazam": ("launched", parse_dd_mmm_yy("26-Sep-24")),
+    "clonazepam": ("launched", parse_dd_mmm_yy("20-Jan-25")),
+    "cyanocobalamin": ("awaited", None),
+    "dabigatran": ("yet", None),
+    "dapagliflozin": ("launched_by_strength", {10.0: parse_dd_mmm_yy("26-Aug-25"), 5.0: parse_dd_mmm_yy("10-Sep-25")}),
+    "dimethyl fumarate": ("launched", parse_dd_mmm_yy("05-Feb-24")),
+    "famotidine": ("launched", parse_dd_mmm_yy("21-Feb-25")),
+    "fesoterodine": ("yet", None),
+    "icatibant": ("launched", parse_dd_mmm_yy("28-Jul-22")),
+    "itraconazole": ("awaited", None),  # treat as no launch date for validity rule
+    "linagliptin": ("yet", None),
+    "linagliptin + metformin": ("awaited", None),
+    "nintedanib": ("awaited", None),
+    "pirfenidone": ("launched", parse_dd_mmm_yy("29-Jun-22")),
+    "raltegravir": ("awaited", None),
+    "ranolazine": ("launched", parse_dd_mmm_yy("20-Jul-23")),
+    "rivaroxaban": ("launched_by_strength", {
+        2.5: parse_dd_mmm_yy("02-Apr-24"),
+        10.0: parse_dd_mmm_yy("23-May-24"),
+        15.0: parse_dd_mmm_yy("23-May-24"),
+        20.0: parse_dd_mmm_yy("23-May-24"),
+    }),
+    "saxagliptin": ("yet", None),
+    "sitagliptin": ("yet", None),
+    "tamsulosin + solifenacin": ("launched", parse_dd_mmm_yy("08-May-23")),
+    "tamsulosin": ("launched", parse_dd_mmm_yy("08-May-23")),
+    "solifenacin": ("launched", parse_dd_mmm_yy("08-May-23")),
+    "tapentadol": ("launched", parse_dd_mmm_yy("01-Feb-24")),
+    "ticagrelor": ("yet", None),
+    "cyclogest": ("launched", None),
+    "progesterone": ("launched", None),
+    "luteum": ("launched", None),
+    "amelgen": ("launched", None),
+}
+
+def get_launch_date(product_name: str, strength_mg) -> date | None:
+    """
+    Return the launch date for a matched company product.
+    Rules:
+    - 'launched' -> return date if present (else None)
+    - 'launched_by_strength' -> return date only if strength provided and matches
+    - 'yet'/'awaited' -> return None (per your spec, we do not invalidate on 'not launched')
+    - unknown product -> None
+    """
+    key = normalize_text(product_name)
+    info = LAUNCH_INFO.get(key)
+    if not info:
+        return None
+    status, payload = info
+    if status == "launched":
+        return payload  # may be None
+    if status == "launched_by_strength":
+        if strength_mg is not None and isinstance(payload, dict):
+            # keys in payload are floats; accept exact match
+            return payload.get(strength_mg)
+        return None
+    # 'yet' or 'awaited'
+    return None
+
 # --- Upload & Parse tab ---
 with tab1:
     st.markdown("### 🔎 Upload Files 🗂️")
     if st.button("Clear Inputs", help="Click to clear all uploaded files and reset the app."):
         st.session_state.clear()
-        st.experimental_rerun()
+        st.rerun()  # FIX: replace deprecated st.experimental_rerun()
 
     uploaded_files = st.file_uploader(
         "Upload E2B XML files",
@@ -291,46 +363,33 @@ with tab1:
                 age_val = age_elem.attrib.get('value', '')
                 raw_unit = age_elem.attrib.get('unit', '')  # 'a' or 'b'
                 unit_text = age_unit_map.get(raw_unit, raw_unit)
-
-                # Clean unknown age value and unit
                 age_val = clean_value(age_val)
                 unit_text_disp = clean_value(unit_text)
-
                 if age_val:
-                    # display only if value is not unknown
                     try:
-                        # pluralization still ok; if numeric parse fails, keep unit as-is
                         n = float(age_val)
                         if unit_text_disp in ("year", "month"):
                             unit_text_disp = unit_text_disp + ("s" if n != 1 else "")
                     except Exception:
                         pass
-                    # if unit is unknown or empty, just show the number
-                    if unit_text_disp:
-                        age = f"{age_val} {unit_text_disp}".strip()
-                    else:
-                        age = f"{age_val}".strip()
+                    age = f"{age_val}" + (f" {unit_text_disp}" if unit_text_disp else "")
 
             weight_elem = root.find('.//hl7:code[@displayName="bodyWeight"]/../hl7:value', ns)
             weight_val = clean_value(weight_elem.attrib.get('value', '') if weight_elem is not None else '')
             weight_unit = clean_value(weight_elem.attrib.get('unit', '') if weight_elem is not None else '')
-            weight = ""
-            if weight_val:
-                weight = f"{weight_val}" + (f" {weight_unit}" if weight_unit else "")
+            weight = f"{weight_val}" + (f" {weight_unit}" if weight_val and weight_unit else "") if weight_val else ""
 
             height_elem = root.find('.//hl7:code[@displayName="height"]/../hl7:value', ns)
             height_val = clean_value(height_elem.attrib.get('value', '') if height_elem is not None else '')
             height_unit = clean_value(height_elem.attrib.get('unit', '') if height_elem is not None else '')
-            height = ""
-            if height_val:
-                height = f"{height_val}" + (f" {height_unit}" if height_unit else "")
+            height = f"{height_val}" + (f" {height_unit}" if height_val and height_unit else "") if height_val else ""
 
             # Patient initials
             patient_initials = ""
             name_elem = root.find('.//hl7:player1/hl7:name', ns)
             if name_elem is not None:
                 if 'nullFlavor' in name_elem.attrib and name_elem.attrib.get('nullFlavor') == 'MSK':
-                    patient_initials = "Masked"  # not treated as unknown
+                    patient_initials = "Masked"  # not treated as unknown unless requested
                 else:
                     init_parts = []
                     for g in name_elem.findall('hl7:given', ns):
@@ -365,7 +424,8 @@ with tab1:
                     age_group = age_group_map[code_val]
                 elif null_flavor in ["MSK", "UNK", "ASKU", "NI"] or code_val in ["MSK", "UNK", "ASKU", "NI"]:
                     age_group = "[Masked/Unknown]"
-            age_group = clean_value(age_group)  # will hide "Unknown" but keep "[Masked/Unknown]"? -> becomes empty (since contains "Unknown"). If you want to keep it, remove this line.
+            # Hide unknowns
+            age_group = clean_value(age_group)
 
             # Patient Detail (skip unknown/empty values)
             patient_parts = []
@@ -382,6 +442,7 @@ with tab1:
             if weight:
                 patient_parts.append(f"Weight: {weight}")
             patient_detail = ", ".join(patient_parts)
+            has_any_patient_detail = any([patient_initials, gender, age_group, age, height, weight])
 
             # Suspect product IDs via causalityAssessment (code == 1)
             suspect_ids = []
@@ -392,13 +453,13 @@ with tab1:
                     if subj_id_elem is not None:
                         suspect_ids.append(subj_id_elem.attrib.get('root', ''))
 
-            # Product/detail build (without validity checks)
+            # Product/detail build
             product_details_list = []
             case_has_category2 = False
 
-            # Collect dates (still used for event rendering only)
-            case_drug_dates = []   # tuples (product_key, start_date, stop_date)
-            case_event_dates = []  # tuples ("event", event_start, event_stop)
+            # Collect dates for validity checks
+            case_drug_dates = []   # tuples (product_key, strength_mg, start_date_obj, stop_date_obj)
+            case_event_dates = []  # tuples ("event", evt_start_obj, evt_stop_obj)
 
             for drug in root.findall('.//hl7:substanceAdministration', ns):
                 id_elem = drug.find('.//hl7:id', ns)
@@ -436,7 +497,7 @@ with tab1:
                         dose_unit = clean_value(dose_unit_raw)
                         strength_mg = extract_strength_mg(raw_drug_text, dose_val, dose_unit)
 
-                        # Dates (drug start/stop) – kept for display context
+                        # Dates (drug start/stop)
                         start_elem = drug.find('.//hl7:low', ns)
                         stop_elem = drug.find('.//hl7:high', ns)
                         start_date_str = start_elem.attrib.get('value', '') if start_elem is not None else ''
@@ -445,7 +506,8 @@ with tab1:
                         stop_date_disp = clean_value(format_date(stop_date_str))
                         start_date_obj = parse_date_obj(start_date_str)
                         stop_date_obj = parse_date_obj(stop_date_str)
-                        case_drug_dates.append((matched_company_prod, start_date_obj, stop_date_obj))
+
+                        case_drug_dates.append((matched_company_prod, strength_mg, start_date_obj, stop_date_obj))
 
                         # Product detail parts (skip unknowns)
                         parts = []
@@ -534,15 +596,14 @@ with tab1:
                     evt_high = reaction.find('.//hl7:effectiveTime/hl7:high', ns)
                     evt_low_str = evt_low.attrib.get('value', '') if evt_low is not None else ''
                     evt_high_str = evt_high.attrib.get('value', '') if evt_high is not None else ''
-                    evt_low_disp = clean_value(format_date(evt_low_str))   # Display: Start
-                    evt_high_disp = clean_value(format_date(evt_high_str)) # Display: End
-                    evt_low_obj = parse_date_obj(evt_low_str)              # Comparison: Start
-                    evt_high_obj = parse_date_obj(evt_high_str)            # Comparison: End
+                    evt_low_disp = clean_value(format_date(evt_low_str))    # Display: Start
+                    evt_high_disp = clean_value(format_date(evt_high_str))  # Display: End
+                    evt_low_obj = parse_date_obj(evt_low_str)               # Comparison: Start
+                    evt_high_obj = parse_date_obj(evt_high_str)             # Comparison: End
                     case_event_dates.append(("event", evt_low_obj, evt_high_obj))
 
                     # Event section details — explicit Start/End labels
                     details_parts = [f"Event {event_count}: {llt_term} ({pt_term})"]
-                    # Append conditionally to avoid showing unknowns
                     seriousness_clean = clean_value(seriousness_display)
                     if seriousness_clean:
                         details_parts.append(f"Seriousness: {seriousness_clean}")
@@ -553,7 +614,6 @@ with tab1:
                     if evt_high_disp:
                         details_parts.append(f"Event End: {evt_high_disp}")
 
-                    # Build line: keep the event header first, then metadata if present
                     if len(details_parts) > 1:
                         event_details_list.append(" (" + "; ".join(details_parts[1:]) + ") " + details_parts[0])
                     else:
@@ -563,18 +623,50 @@ with tab1:
 
             event_details_combined_display = "\n".join(event_details_list)
 
-            # --- Reportability (kept) ---
+            # --- Reportability (kept from baseline) ---
             if case_has_serious_event and case_has_category2:
                 reportability = "Category 2, serious, reportable case"
             else:
                 reportability = "Non-Reportable"
+
+            # --- Validity assessment (single reason only, per your spec) ---
+            validity_reason = None
+
+            # Rule 1: No patient details
+            if not has_any_patient_detail:
+                validity_reason = "No patient details"
+
+            # Rule 2: Any event/drug dates prior to launch date
+            if validity_reason is None:
+                launch_dates = []
+                for prod, strength_mg, sdt, edt in case_drug_dates:
+                    ld = get_launch_date(prod, strength_mg)
+                    if ld:
+                        launch_dates.append(ld)
+                if launch_dates:
+                    min_launch_dt = min(launch_dates)
+
+                    # Check event dates
+                    for _, evt_start, evt_stop in case_event_dates:
+                        if (evt_start and evt_start < min_launch_dt) or (evt_stop and evt_stop < min_launch_dt):
+                            validity_reason = "Drug exposure prior to Launch"
+                            break
+
+                    # Check drug dates only if no reason yet
+                    if validity_reason is None:
+                        for _, _, drug_start, drug_stop in case_drug_dates:
+                            if (drug_start and drug_start < min_launch_dt) or (drug_stop and drug_stop < min_launch_dt):
+                                validity_reason = "Drug exposure prior to Launch"
+                                break
+
+            validity_value = f"Non-Valid ({validity_reason})" if validity_reason else "Valid"
 
             # Narrative (full text, no truncation)
             narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
             narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
             narrative_full = clean_value(narrative_full_raw)
 
-            # Collect row (Validity columns removed)
+            # Collect row
             all_rows_display.append({
                 'SL No': idx,
                 'Date': current_date,
@@ -586,6 +678,7 @@ with tab1:
                 'Event Details': event_details_combined_display,
                 'Narrative': narrative_full,
                 'Reportability': reportability,
+                'Validity': validity_value,   # NEW
                 'Listedness': '',
                 'App Assessment': '',
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
@@ -627,6 +720,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
