@@ -12,7 +12,7 @@ import io
 import re
 import calendar
 
-st.set_page_config(page_title="E2B_R3 XML Parser Application", layout="wide")
+st.set_page_config(page_title="E2B_R3 XML Triage Application", layout="wide")
 st.markdown(""" """, unsafe_allow_html=True)
 st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
 
