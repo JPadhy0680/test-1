@@ -14,7 +14,7 @@ import calendar
 
 st.set_page_config(page_title="E2B_R3 XML Triage Application", layout="wide")
 st.markdown(""" """, unsafe_allow_html=True)
-st.title("📊🧠 E2B_R3 XML Parser Application 🛠️ 🚀")
+st.title("📊🧠 E2B_R3 XML Triage Application 🛠️ 🚀")
 
 # Version header
 # v1.5.0-listedness-clarified:
