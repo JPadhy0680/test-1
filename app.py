@@ -186,6 +186,54 @@ def extract_pl_numbers(text: str):
         out.append(f"{prefix} {company_code}/{product_code}")
     return out
 
+
+# Common formulation words to ignore in name checks
+COMMON_FORM_WORDS = {
+    'tablet','tablets','capsule','capsules','injection','mg','mcg','ml',
+    'solution','suspension','cream','gel','ointment','spray','sirup','syrup','powder',
+    'patch','dose','strength','film','coated','extended','release','prn'
+}
+
+# Detect cases like: "Abiraterone [JANSSEN]" where molecule is ours but a non-Celix company tag appears
+def detect_molecule_name_differ(raw_name: str, my_company: str, competitor_names: set[str]) -> bool:
+    if not raw_name:
+        return False
+    text = str(raw_name)
+    # Look for bracketed tags or trailing company markers
+    tags = []
+    tags += re.findall(r"\[(.*?)\]", text)
+    tags += re.findall(r"\bby\s+([A-Za-z &.]+)", text, flags=re.IGNORECASE)
+    # Also consider parts after ' -- ' or '-' if they look like a company label
+    parts = [p.strip() for p in re.split(r"\s+--\s+|\-\-", text) if p.strip()]
+    if len(parts) >= 2:
+        tags.append(parts[-1])
+    # Normalize and filter common formulation words
+    def norm(u):
+        return re.sub(r"[^a-z0-9 ]"," ", u.lower()).strip()
+    my_norm = norm(my_company)
+    for t in tags:
+        tn = norm(t)
+        if not tn or tn in COMMON_FORM_WORDS:
+            continue
+        # skip if it only contains strength or form words
+        if any(w in tn.split() for w in COMMON_FORM_WORDS):
+            # if tag is just a form/strength phrase, ignore
+            # e.g., '[5 mg tablets]'
+            tokens = [w for w in tn.split() if w not in COMMON_FORM_WORDS]
+            if not tokens:
+                continue
+        # if tag mentions our company, ignore
+        if my_norm and my_norm in tn:
+            continue
+        # if tag contains any known competitor name, flag
+        for comp in competitor_names:
+            cn = norm(comp)
+            if cn and cn in tn:
+                return True
+        # otherwise, if tag looks like an organization word (heuristic: 2+ letters, not numeric), flag
+        if re.search(r"[a-z]{3,}", tn):
+            return True
+    return False
 company_products = [
     "abiraterone", "apixaban", "apremilast", "bexarotene",
     "clobazam", "clonazepam", "cyanocobalamin", "dabigatran",
@@ -527,6 +575,13 @@ with tab1:
                         display_name = raw_drug_text if raw_drug_text else matched_company_prod.title()
                         display_name = clean_value(display_name)
                         if display_name: parts.append(f"Drug: {display_name}")
+                # Comment: molecule name shows different company tag
+                try:
+                    if detect_molecule_name_differ(raw_drug_text, MY_COMPANY_NAME, competitor_names):
+                        comments.append("Molecule name differ")
+                except Exception:
+                    pass
+
 
                         text_clean = ""
                         if text_elem is not None and text_elem.text:
@@ -794,3 +849,4 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
