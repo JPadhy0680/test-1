@@ -186,6 +186,45 @@ def extract_pl_numbers(text: str):
         out.append(f"{prefix} {company_code}/{product_code}")
     return out
 
+
+# Common formulation words to ignore in name checks
+COMMON_FORM_WORDS = {
+    'tablet','tablets','capsule','capsules','injection','mg','mcg','ml',
+    'solution','suspension','cream','gel','ointment','spray','sirup','syrup','powder',
+    'patch','dose','strength','film','coated','extended','release','prn'
+}
+
+# Detect cases like: "Abiraterone [JANSSEN]" where molecule is ours but a non-Celix company tag appears
+def detect_molecule_name_differ(raw_name: str, my_company: str, competitor_names: set[str]) -> bool:
+    import re as _re
+    if not raw_name:
+        return False
+    text = str(raw_name)
+    tags = []
+    tags += _re.findall(r"\[(.*?)\]", text)
+    tags += _re.findall(r"\bby\s+([A-Za-z &.]+)", text, flags=_re.IGNORECASE)
+    parts = [p.strip() for p in _re.split(r"\s+--\s+|\-\-", text) if p.strip()]
+    if len(parts) >= 2:
+        tags.append(parts[-1])
+    def norm(u):
+        return _re.sub(r"[^a-z0-9 ]"," ", str(u).lower()).strip()
+    my_norm = norm(my_company)
+    for t in tags:
+        tn = norm(t)
+        if not tn or tn in COMMON_FORM_WORDS:
+            continue
+        tokens = [w for w in tn.split() if w not in COMMON_FORM_WORDS]
+        if not tokens:
+            continue
+        if my_norm and my_norm in tn:
+            continue
+        for comp in competitor_names:
+            cn = norm(comp)
+            if cn and cn in tn:
+                return True
+        if _re.search(r"[a-z]{3,}", tn):
+            return True
+    return False
 company_products = [
     "abiraterone", "apixaban", "apremilast", "bexarotene",
     "clobazam", "clonazepam", "cyanocobalamin", "dabigatran",
@@ -527,6 +566,13 @@ with tab1:
                         display_name = raw_drug_text if raw_drug_text else matched_company_prod.title()
                         display_name = clean_value(display_name)
                         if display_name: parts.append(f"Drug: {display_name}")
+                        # Comment: molecule name shows different company tag
+                        try:
+                            if detect_molecule_name_differ(raw_drug_text, MY_COMPANY_NAME, competitor_names):
+                                comments.append("Molecule name differ")
+                        except Exception:
+                            pass
+
 
                         text_clean = ""
                         if text_elem is not None and text_elem.text:
@@ -574,10 +620,6 @@ with tab1:
                                 comments.append(f"plz check product name: {pl} given")
 
                         if lot_clean and contains_competitor_name(lot_clean, competitor_names):
-
-                            # Comment: verify LOT number if product appears non-company (MAH not Celix)
-                            if lot_clean and mah_name_clean and MY_COMPANY_NAME.lower() not in mah_name_clean.lower():
-                                comments.append("Verify LOT number for Non-Company product")
                             comments.append(f"Lot number '{lot_clean}' may belong to another company — please verify.")
 
                         if mah_name_clean and MY_COMPANY_NAME.lower() not in mah_name_clean.lower():
@@ -798,4 +840,5 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
