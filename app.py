@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import xml.etree.ElementTree as ET
@@ -11,12 +12,12 @@ st.markdown("""""", unsafe_allow_html=True)
 st.title("📊🧠 E2B_R3 XML Triage Application 🛠️ 🚀")
 
 # Version header
-# v1.5.1:
-# - Validity: Prior-to-launch checks apply only to suspect Celix products that appear in Product Detail.
-# - Per-product (and strength) launch-date comparisons; no global earliest launch date.
-# - Fixes string glitch in "Drug exposure prior to Launch" assignment.
+# v1.5.2:
+# - Validity: Removed event-vs-launch comparison to avoid false Non-Valid triggers.
+# - Prior-to-launch now checks ONLY drug administration dates vs the product's own launch date,
+#   and ONLY for Celix suspect products that appear in Product Detail.
+# - Adds a debug comment when prior-to-launch triggers (which product/date caused it).
 # - Listedness remains event-level and omitted for Non-Valid cases (unchanged).
-# - Product Detail shows only Celix suspects; column order unchanged.
 
 def _get_password():
     DEFAULT_PASSWORD = "7064242966"
@@ -294,7 +295,7 @@ LAUNCH_INFO = {
     "amelgen": ("launched", None),
 }
 
-def get_launch_date(product_name: str, strength_mg) -> date | None:
+def get_launch_date(product_name: str, strength_mg):
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
     if not info:
@@ -310,7 +311,7 @@ def get_launch_date(product_name: str, strength_mg) -> date | None:
         return None
     return None
 
-def get_launch_status(product_name: str) -> str | None:
+def get_launch_status(product_name: str):
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
     if not info:
@@ -544,11 +545,11 @@ with tab1:
             product_details_list = []
             case_has_category2 = False
             case_drug_dates = []    # (matched_company_prod, strength_mg, start_date_obj, stop_date_obj)
-            case_event_dates = []   # ("event", evt_start_obj, evt_stop_obj)
+            case_event_dates = []   # ("event", evt_start_obj, evt_stop_obj)  # kept for display only
             case_mah_names = set()
             case_products_norm = set()
             case_llts_norm = set()
-            displayed_suspects_norm = set()  # NEW: track suspects that are displayed in Product Detail
+            displayed_suspects_norm = set()  # track suspects displayed in Product Detail
 
             for drug in root.findall('.//hl7:substanceAdministration', ns):
                 id_elem = drug.find('.//hl7:id', ns)
@@ -670,10 +671,10 @@ with tab1:
 
                         if parts:
                             product_details_list.append(" \n ".join(parts))
-                            # NEW: mark suspect as displayed (normalized)
+                            # mark suspect as displayed (normalized)
                             displayed_suspects_norm.add(normalize_text(matched_company_prod))
 
-            # Events parsing
+            # Events parsing (kept for display only; no longer used in validity checks)
             seriousness_criteria = list(seriousness_map.keys())
             event_details_list = []
             event_count = 1
@@ -693,7 +694,7 @@ with tab1:
                 # None of the suspect drugs are present in the reference's drug list
                 suspect_in_ref = {p for p in suspect_products_norm if p in ref_drugs_set}
                 if not suspect_in_ref:
-                    return "Reference not updated"  # Ask to upload an updated list
+                    return "Reference not updated"
                 # Drug present: check (drug, LLT) pairing
                 for p in suspect_in_ref:
                     if (p, llt_norm) in listed_pairs_set:
@@ -707,7 +708,6 @@ with tab1:
                     llt_code = value_elem.attrib.get('code', '') if value_elem is not None else ''
                     llt_term, pt_term = "", ""
 
-                    # Map LLT code -> LLT term (and PT term)
                     if mapping_df is not None and llt_code:
                         try:
                             llt_code_str = str(llt_code).strip()
@@ -722,7 +722,6 @@ with tab1:
                     elif llt_code:
                         warnings.append(f"LLT mapping file not provided — listedness cannot be assessed for LLT code {llt_code}.")
 
-                    # Only assess listedness when we have the LLT TERM (not just the code)
                     if llt_term:
                         llt_norm = normalize_text(llt_term)
                         case_llts_norm.add(llt_norm)
@@ -775,7 +774,7 @@ with tab1:
                 reportability = "Non-Reportable"
 
             # ---------------------------
-            # Validity assessment (UPDATED)
+            # Validity assessment (UPDATED v1.5.2)
             # ---------------------------
             validity_reason = None
 
@@ -801,25 +800,8 @@ with tab1:
                         validity_reason = "Product not Launched"
                         break
 
-            # 4) Events prior to product-specific launch date (only displayed suspects)
-            if validity_reason is None:
-                for prod, strength_mg, _drug_start, _drug_stop in case_drug_dates:
-                    if not prod:
-                        continue
-                    prod_norm = normalize_text(prod)
-                    if prod_norm not in displayed_suspects_norm:
-                        continue
-                    prod_launch = get_launch_date(prod, strength_mg)
-                    if not prod_launch:
-                        continue
-                    for _tag, evt_start, evt_stop in case_event_dates:
-                        if (evt_start and evt_start < prod_launch) or (evt_stop and evt_stop < prod_launch):
-                            validity_reason = "Drug exposure prior to Launch"
-                            break
-                    if validity_reason is not None:
-                        break
-
-            # 5) Drug administration prior to product-specific launch date (only displayed suspects)
+            # 4) Drug administration prior to product-specific launch date (ONLY displayed suspects)
+            #    (Event dates are NOT used in validity checks anymore.)
             if validity_reason is None:
                 for prod, strength_mg, drug_start, drug_stop in case_drug_dates:
                     if not prod:
@@ -832,6 +814,9 @@ with tab1:
                         continue
                     if (drug_start and drug_start < prod_launch) or (drug_stop and drug_stop < prod_launch):
                         validity_reason = "Drug exposure prior to Launch"
+                        # Add a debug comment for transparency
+                        comments.append(f"[Debug] Prior-to-launch trigger -> product={prod}, launch={prod_launch}, "
+                                        f"drug_start={drug_start or 'NA'}, drug_stop={drug_stop or 'NA'}")
                         break
 
             validity_value = f"Non-Valid ({validity_reason})" if validity_reason else "Valid"
@@ -912,6 +897,7 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
 
 
 
