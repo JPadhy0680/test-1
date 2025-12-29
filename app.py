@@ -8,16 +8,13 @@ import re
 import calendar
 
 st.set_page_config(page_title="E2B_R3 XML Triage Application", layout="wide")
-st.markdown("""""", unsafe_allow_html=True)
+st.markdown(""" """, unsafe_allow_html=True)
 st.title("📊🧠 E2B_R3 XML Triage Application 🛠️ 🚀")
 
 # Version header
-# v1.5.2:
-# - Validity: Removed event-vs-launch comparison to avoid false Non-Valid triggers.
-# - Prior-to-launch now checks ONLY drug administration dates vs the product's own launch date,
-#   and ONLY for Celix suspect products that appear in Product Detail.
-# - Adds a debug comment when prior-to-launch triggers (which product/date caused it).
-# - Listedness remains event-level and omitted for Non-Valid cases (unchanged).
+# v1.5.1-validity-check-fixed:
+# - Fixes malformed string and improves Non-company product detection when suspects present but none match Celix.
+# - Listedness logic unchanged (event-level, LLT-based; omitted for Non-Valid cases).
 
 def _get_password():
     DEFAULT_PASSWORD = "7064242966"
@@ -53,16 +50,13 @@ with st.expander("📖 Instructions"):
 
 # Tabs
 tab1, tab2 = st.tabs(["Upload & Parse", "Export & Edit"])
-
 if "uploader_version" not in st.session_state:
     st.session_state["uploader_version"] = 0
 
 all_rows_display = []
 current_date = datetime.now().strftime("%d-%b-%Y")
 
-# ---------------------------
 # Helpers
-# ---------------------------
 def _digits_only(s: str) -> str:
     return re.sub(r"\D", "", (s or "").strip())
 
@@ -107,18 +101,15 @@ def parse_date_obj(date_str: str):
         return None
 
 def map_reporter(code):
-    return {"1": "Physician", "2": "Pharmacist", "3": "Other health professional",
-            "4": "Lawyer", "5": "Consumer or other non-health professional"}.get(code, "Unknown")
+    return {"1": "Physician", "2": "Pharmacist", "3": "Other health professional", "4": "Lawyer", "5": "Consumer or other non-health professional"}.get(code, "Unknown")
 
 def map_gender(code):
     return {"1": "Male", "2": "Female"}.get(code, "Unknown")
 
 def map_outcome(code):
-    return {"1": "Recovered/Resolved", "2": "Recovering/Resolving", "3": "Not recovered/Ongoing",
-            "4": "Recovered with sequelae", "5": "Fatal", "0": "Unknown"}.get(code, "Unknown")
+    return {"1": "Recovered/Resolved", "2": "Recovering/Resolving", "3": "Not recovered/Ongoing", "4": "Recovered with sequelae", "5": "Fatal", "0": "Unknown"}.get(code, "Unknown")
 
 AGE_UNIT_MAP = {"a": "year", "b": "month"}
-
 def map_age_unit(raw_unit: str) -> str:
     if raw_unit is None:
         return ""
@@ -126,7 +117,6 @@ def map_age_unit(raw_unit: str) -> str:
     return AGE_UNIT_MAP.get(ru, ru)
 
 UNKNOWN_TOKENS = {"unk", "asku", "unknown"}
-
 def is_unknown(value: str) -> bool:
     if value is None:
         return True
@@ -155,16 +145,13 @@ def contains_company_product(text: str, company_products: list) -> str:
             return prod
     return ""
 
-MG_PATTERN = re.compile(r"\b(\d{1,3}(?:,\d{3})*\d+(?:\.\d{1,3})?)\s*mg\b", re.IGNORECASE)
-
+MG_PATTERN = re.compile(r"\((\d{1,3}(?:,\d{3})*\d+(?:\.\d{1,3})?)\)\s*mg\b", re.IGNORECASE)
 def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
-    # Prefer explicit dose in mg
     if dose_val and dose_unit and dose_unit.lower() == "mg":
         try:
             return float(str(dose_val).replace(",", ""))
         except Exception:
             pass
-    # Else try to find mg in free text
     if raw_text:
         m = MG_PATTERN.search(raw_text or "")
         if m:
@@ -175,7 +162,6 @@ def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
     return None
 
 PL_PATTERN = re.compile(r'\b(PL|PLGB|PLNI)\s*([0-9]{5})\s*/\s*([0-9]{4,5})\b', re.IGNORECASE)
-
 def extract_pl_numbers(text: str):
     out = []
     if not text:
@@ -194,27 +180,21 @@ COMMON_FORM_WORDS = {
     'patch','dose','strength','film','coated','extended','release','prn'
 }
 
+# Detect cases like: "Abiraterone [JANSSEN]" where molecule is ours but a non-Celix company tag appears
 def detect_molecule_name_differ(raw_name: str, my_company: str, competitor_names: set[str]) -> bool:
-    """
-    Detect cases like: "Abiraterone [JANSSEN]" where molecule is ours but a non-Celix tag appears.
-    """
+    import re as _re
     if not raw_name:
         return False
     text = str(raw_name)
-
-    # Extract bracketed tags or "by <Company>"
     tags = []
-    tags += re.findall(r"\[(.*?)\]", text)
-    by_matches = re.findall(r"\bby\s+([A-Za-z &\.]+)", text, flags=re.IGNORECASE)
-    tags += by_matches
-
-    # Split on obvious separators like " -- " or "--"
-    parts = [p.strip() for p in re.split(r"\s+--\s+|--", text) if p.strip()]
+    tags += _re.findall(r"\[(.*?)\]", text)
+    tags += _re.findall(r"\bby\s+([A-Za-z &.]+)", text, flags=_re.IGNORECASE)
+    parts = [p.strip() for p in _re.split(r"\s+--\s+|\s*-\s*-", text) if p.strip()]
     if len(parts) >= 2:
         tags.append(parts[-1])
 
     def norm(u):
-        return re.sub(r"[^a-z0-9 ]", " ", str(u).lower()).strip()
+        return _re.sub(r"[^a-z0-9 ]"," ", str(u).lower()).strip()
 
     my_norm = norm(my_company)
     for t in tags:
@@ -230,8 +210,7 @@ def detect_molecule_name_differ(raw_name: str, my_company: str, competitor_names
             cn = norm(comp)
             if cn and cn in tn:
                 return True
-        # Generic company-ish tag with 3+ letters
-        if re.search(r"[a-z]{3,}", tn):
+        if _re.search(r"[a-z]{3,}", tn):
             return True
     return False
 
@@ -278,10 +257,7 @@ LAUNCH_INFO = {
     "pirfenidone": ("launched", parse_dd_mmm_yy("29-Jun-22")),
     "raltegravir": ("awaited", None),
     "ranolazine": ("launched", parse_dd_mmm_yy("20-Jul-23")),
-    "rivaroxaban": ("launched_by_strength", {2.5: parse_dd_mmm_yy("02-Apr-24"),
-                                             10.0: parse_dd_mmm_yy("23-May-24"),
-                                             15.0: parse_dd_mmm_yy("23-May-24"),
-                                             20.0: parse_dd_mmm_yy("23-May-24")}),
+    "rivaroxaban": ("launched_by_strength", {2.5: parse_dd_mmm_yy("02-Apr-24"), 10.0: parse_dd_mmm_yy("23-May-24"), 15.0: parse_dd_mmm_yy("23-May-24"), 20.0: parse_dd_mmm_yy("23-May-24")}),
     "saxagliptin": ("yet", None),
     "sitagliptin": ("yet", None),
     "tamsulosin + solifenacin": ("launched", parse_dd_mmm_yy("08-May-23")),
@@ -295,7 +271,7 @@ LAUNCH_INFO = {
     "amelgen": ("launched", None),
 }
 
-def get_launch_date(product_name: str, strength_mg):
+def get_launch_date(product_name: str, strength_mg) -> date | None:
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
     if not info:
@@ -311,7 +287,7 @@ def get_launch_date(product_name: str, strength_mg):
         return None
     return None
 
-def get_launch_status(product_name: str):
+def get_launch_status(product_name: str) -> str | None:
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
     if not info:
@@ -319,8 +295,7 @@ def get_launch_status(product_name: str):
     return info[0]
 
 MY_COMPANY_NAME = "celix"
-DEFAULT_COMPETITOR_NAMES = {"glenmark", "cipla", "sun pharma", "dr reddy", "dr. reddy",
-                            "torrent", "lupin", "intas", "mankind", "micro labs", "zydus"}
+DEFAULT_COMPETITOR_NAMES = {"glenmark", "cipla", "sun pharma", "dr reddy", "dr. reddy", "torrent", "lupin", "intas", "mankind", "micro labs", "zydus"}
 
 def contains_competitor_name(lot_text: str, competitor_names: set[str]) -> bool:
     if not lot_text:
@@ -343,9 +318,6 @@ def get_mah_name_for_drug(drug_elem, root, ns) -> str:
         return mah_global.text.strip()
     return ""
 
-# ---------------------------
-# Tab 1 — Upload & Parse
-# ---------------------------
 with tab1:
     st.markdown("### 🔎 Upload Files 🗂️")
     if st.button("Clear Inputs", help="Clear uploaded XMLs and parsed data (keep access)."):
@@ -358,29 +330,12 @@ with tab1:
         st.rerun()
 
     ver = st.session_state.get("uploader_version", 0)
-    uploaded_files = st.file_uploader(
-        "Upload E2B XML files",
-        type=["xml"],
-        accept_multiple_files=True,
-        help="Upload one or more E2B XML files for parsing.",
-        key=f"xml_uploader_{ver}"
-    )
-    mapping_file = st.file_uploader(
-        "Upload LLT-PT Mapping Excel file",
-        type=["xlsx"],
-        help="Upload the MedDRA LLT-PT mapping Excel file.",
-        key=f"map_uploader_{ver}"
-    )
-    listed_ref_file = st.file_uploader(
-        "Upload Listedness Reference (Excel: columns 'Drug Name','LLT')",
-        type=["xlsx"],
-        help="Event-level listedness uses (Drug, LLT) pairs.",
-        key=f"listed_ref_{ver}"
-    )
+    uploaded_files = st.file_uploader("Upload E2B XML files", type=["xml"], accept_multiple_files=True, help="Upload one or more E2B XML files for parsing.", key=f"xml_uploader_{ver}")
+    mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"], help="Upload the MedDRA LLT-PT mapping Excel file.", key=f"map_uploader_{ver}")
+    listed_ref_file = st.file_uploader("Upload Listedness Reference (Excel: columns 'Drug Name','LLT')", type=["xlsx"], help="Event-level listedness uses (Drug, LLT) pairs.", key=f"listed_ref_{ver}")
 
     competitor_names = set(DEFAULT_COMPETITOR_NAMES)
 
-    # Load mapping
     mapping_df = None
     if mapping_file:
         mapping_df = pd.read_excel(mapping_file, engine="openpyxl")
@@ -426,8 +381,6 @@ with tab1:
         for idx, uploaded_file in enumerate(uploaded_files, start=1):
             warnings = []
             comments = []
-
-            # Parse XML
             try:
                 tree = ET.parse(uploaded_file)
                 root = tree.getroot()
@@ -438,9 +391,9 @@ with tab1:
 
             ns = {'hl7': 'urn:hl7-org:v3'}
 
-            # Sender & Transmission date
             sender_elem = root.find('.//hl7:id[@root="2.16.840.1.113883.3.989.2.1.3.1"]', ns)
             sender_id = clean_value(sender_elem.attrib.get('extension', '') if sender_elem is not None else '')
+
             creation_elem = root.find('.//hl7:creationTime', ns)
             creation_raw = creation_elem.attrib.get('value', '') if creation_elem is not None else ''
             transmission_date = clean_value(format_date(creation_raw))
@@ -455,11 +408,9 @@ with tab1:
             except Exception:
                 case_age_days = ""
 
-            # Reporter
             reporter_elem = root.find('.//hl7:asQualifiedEntity/hl7:code', ns)
             reporter_qualification = clean_value(map_reporter(reporter_elem.attrib.get('code', '') if reporter_elem is not None else ''))
 
-            # Patient
             gender_elem = root.find('.//hl7:administrativeGenderCode', ns)
             gender_mapped = map_gender(gender_elem.attrib.get('code', '') if gender_elem is not None else '')
             gender = clean_value(gender_mapped)
@@ -544,12 +495,11 @@ with tab1:
 
             product_details_list = []
             case_has_category2 = False
-            case_drug_dates = []    # (matched_company_prod, strength_mg, start_date_obj, stop_date_obj)
-            case_event_dates = []   # ("event", evt_start_obj, evt_stop_obj)  # kept for display only
+            case_drug_dates = []
+            case_event_dates = []
             case_mah_names = set()
             case_products_norm = set()
             case_llts_norm = set()
-            displayed_suspects_norm = set()  # track suspects displayed in Product Detail
 
             for drug in root.findall('.//hl7:substanceAdministration', ns):
                 id_elem = drug.find('.//hl7:id', ns)
@@ -594,7 +544,6 @@ with tab1:
                     stop_date_disp = clean_value(format_date(stop_date_str))
                     start_date_obj = parse_date_obj(start_date_str)
                     stop_date_obj = parse_date_obj(stop_date_str)
-
                     case_drug_dates.append((matched_company_prod, strength_mg, start_date_obj, stop_date_obj))
 
                     mah_name_raw = get_mah_name_for_drug(drug, root, ns)
@@ -602,13 +551,11 @@ with tab1:
                     if mah_name_clean:
                         case_mah_names.add(mah_name_clean)
 
-                    # Build product detail line
                     if matched_company_prod:
                         parts = []
                         display_name = raw_drug_text if raw_drug_text else matched_company_prod.title()
                         display_name = clean_value(display_name)
-                        if display_name:
-                            parts.append(f"Drug: {display_name}")
+                        if display_name: parts.append(f"Drug: {display_name}")
 
                         # Comment: molecule name shows different company tag
                         try:
@@ -620,8 +567,7 @@ with tab1:
                         text_clean = ""
                         if text_elem is not None and text_elem.text:
                             text_clean = clean_value(text_elem.text)
-                        if text_clean:
-                            parts.append(f"Dosage: {text_clean}")
+                        if text_clean: parts.append(f"Dosage: {text_clean}")
 
                         if dose_val or dose_unit:
                             if dose_val and dose_unit:
@@ -653,7 +599,6 @@ with tab1:
                         if mah_name_clean:
                             parts.append(f"MAH: {mah_name_clean}")
 
-                        # PL numbers hints
                         pl_hits = set()
                         for t in [display_name, text_clean, form_clean, lot_clean]:
                             for pl in extract_pl_numbers(t):
@@ -671,17 +616,14 @@ with tab1:
 
                         if parts:
                             product_details_list.append(" \n ".join(parts))
-                            # mark suspect as displayed (normalized)
-                            displayed_suspects_norm.add(normalize_text(matched_company_prod))
 
-            # Events parsing (kept for display only; no longer used in validity checks)
             seriousness_criteria = list(seriousness_map.keys())
             event_details_list = []
             event_count = 1
             case_has_serious_event = False
             event_listedness_items = []
 
-            # LLT-term based listedness assessment
+            # ----- Listedness assessment function (LLT-term based) -----
             def assess_event_listedness(
                 llt_norm: str,
                 suspect_products_norm: set[str],
@@ -691,16 +633,19 @@ with tab1:
                 # No reference uploaded at all
                 if not listed_pairs_set or not ref_drugs_set:
                     return "Reference not uploaded"
+
                 # None of the suspect drugs are present in the reference's drug list
                 suspect_in_ref = {p for p in suspect_products_norm if p in ref_drugs_set}
                 if not suspect_in_ref:
-                    return "Reference not updated"
+                    return "Reference not updated"  # Ask to upload an updated list
+
                 # Drug present: check (drug, LLT) pairing
                 for p in suspect_in_ref:
                     if (p, llt_norm) in listed_pairs_set:
                         return "Listed"
                 return "Unlisted"
 
+            # ----- Events (reactions) parsing -----
             for reaction in root.findall('.//hl7:observation', ns):
                 code_elem = reaction.find('hl7:code', ns)
                 if code_elem is not None and code_elem.attrib.get('displayName') == 'reaction':
@@ -708,6 +653,7 @@ with tab1:
                     llt_code = value_elem.attrib.get('code', '') if value_elem is not None else ''
                     llt_term, pt_term = "", ""
 
+                    # Map LLT code -> LLT term (and PT term)
                     if mapping_df is not None and llt_code:
                         try:
                             llt_code_str = str(llt_code).strip()
@@ -722,12 +668,14 @@ with tab1:
                     elif llt_code:
                         warnings.append(f"LLT mapping file not provided — listedness cannot be assessed for LLT code {llt_code}.")
 
+                    # Only assess listedness when we have the LLT TERM (not just the code)
                     if llt_term:
                         llt_norm = normalize_text(llt_term)
                         case_llts_norm.add(llt_norm)
                         ev_status = assess_event_listedness(llt_norm, case_products_norm, listed_pairs, ref_drugs)
                     else:
                         ev_status = "LLT mapping missing"
+
                     event_listedness_items.append(f"Event {event_count}: {ev_status}")
 
                     seriousness_flags = []
@@ -753,6 +701,7 @@ with tab1:
                     evt_high_disp = clean_value(format_date(evt_high_str))
                     evt_low_obj = parse_date_obj(evt_low_str)
                     evt_high_obj = parse_date_obj(evt_high_str)
+
                     case_event_dates.append(("event", evt_low_obj, evt_high_obj))
 
                     details_parts = [f"Event {event_count}: {llt_term} ({pt_term})", f"Seriousness: {seriousness_display}"]
@@ -773,71 +722,75 @@ with tab1:
             else:
                 reportability = "Non-Reportable"
 
-            # ---------------------------
-            # Validity assessment (UPDATED v1.5.2)
-            # ---------------------------
+            # -------- Validity assessment (FIXED) --------
             validity_reason = None
 
-            # 1) Missing patient details
+            # Helper flags
+            has_any_suspect = bool(suspect_ids)             # suspects found in the case (from XML)
+            has_celix_suspect = bool(case_products_norm)    # suspects that matched Celix product list
+
+            # 1) No patient details
             if not has_any_patient_detail:
                 validity_reason = "No patient details"
 
-            # 2) Non-company product (MAH differs)
+            # 2) Suspects present but none are Celix -> Non-company product
+            if validity_reason is None and has_any_suspect and not has_celix_suspect:
+                validity_reason = "Non-company product"
+
+            # 3) MAH shows non-Celix -> Non-company product
             if validity_reason is None:
                 if any(name and MY_COMPANY_NAME.lower() not in name.lower() for name in case_mah_names):
                     validity_reason = "Non-company product"
 
-            # 3) Product not launched (status = yet/awaited) on any displayed suspect
+            # 4) Product not launched (status yet/awaited)
             if validity_reason is None:
                 for prod, strength_mg, sdt, edt in case_drug_dates:
-                    if not prod:
-                        continue
-                    prod_norm = normalize_text(prod)
-                    if prod_norm not in displayed_suspects_norm:
-                        continue  # only consider suspects shown in Product Detail
                     status = get_launch_status(prod)
                     if status in ("yet", "awaited"):
                         validity_reason = "Product not Launched"
                         break
 
-            # 4) Drug administration prior to product-specific launch date (ONLY displayed suspects)
-            #    (Event dates are NOT used in validity checks anymore.)
+            # 5) Dates before launch -> Drug exposure prior to Launch
             if validity_reason is None:
-                for prod, strength_mg, drug_start, drug_stop in case_drug_dates:
-                    if not prod:
-                        continue
-                    prod_norm = normalize_text(prod)
-                    if prod_norm not in displayed_suspects_norm:
-                        continue
-                    prod_launch = get_launch_date(prod, strength_mg)
-                    if not prod_launch:
-                        continue
-                    if (drug_start and drug_start < prod_launch) or (drug_stop and drug_stop < prod_launch):
-                        validity_reason = "Drug exposure prior to Launch"
-                        # Add a debug comment for transparency
-                        comments.append(f"[Debug] Prior-to-launch trigger -> product={prod}, launch={prod_launch}, "
-                                        f"drug_start={drug_start or 'NA'}, drug_stop={drug_stop or 'NA'}")
-                        break
+                launch_dates = []
+                for prod, strength_mg, sdt, edt in case_drug_dates:
+                    ld = get_launch_date(prod, strength_mg)
+                    if ld:
+                        launch_dates.append(ld)
+
+                if launch_dates:
+                    min_launch_dt = min(launch_dates)
+
+                    # Compare event dates against launch
+                    for _, evt_start, evt_stop in case_event_dates:
+                        if (evt_start and evt_start < min_launch_dt) or (evt_stop and evt_stop < min_launch_dt):
+                            validity_reason = "Drug exposure prior to Launch"
+                            break
+
+                    # Compare drug dates against launch
+                    if validity_reason is None:
+                        for _, _, drug_start, drug_stop in case_drug_dates:
+                            if (drug_start and drug_start < min_launch_dt) or (drug_stop and drug_stop < min_launch_dt):
+                                validity_reason = "Drug exposure prior to Launch"
+                                break
 
             validity_value = f"Non-Valid ({validity_reason})" if validity_reason else "Valid"
 
-            # Narrative
             narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
             narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
             narrative_full = clean_value(narrative_full_raw)
 
-            # If comments exist and no Non-Valid reason found -> ask manual validity review
+            # If comments exist but no automatic Non-Valid reason was set, defer to manual validity review
             if comments and validity_reason is None:
                 validity_value = "Kindly check comment and assess validity manually"
 
-            # Omit listedness & reportability for Non-Valid cases
-            listedness_event_level_display = "; ".join(event_listedness_items)
+            # Omit listedness for Non-Valid cases
             if isinstance(validity_value, str) and validity_value.startswith("Non-Valid"):
                 reportability = "NA"
                 event_listedness_items = []  # omit listedness for Non-Valid
-                listedness_event_level_display = ""  # explicitly blank
+            listedness_event_level_display = "; ".join(event_listedness_items)
 
-            # Add warning if reference missing/not updated
+            # Add warning if reference is missing or not updated
             if ("Reference not uploaded" in listedness_event_level_display) or ("Reference not updated" in listedness_event_level_display):
                 warnings.append("Listedness reference is missing or incomplete—please upload an updated (Drug Name, LLT) list.")
 
@@ -864,9 +817,6 @@ with tab1:
 
         st.success(f"Parsing complete ✅ — Files processed: {total_files}, Rows created: {parsed_rows}")
 
-# ---------------------------
-# Tab 2 — Export & Edit
-# ---------------------------
 with tab2:
     st.markdown("### 📋 Parsed Data Table 🗃️")
     if all_rows_display:
@@ -889,7 +839,6 @@ with tab2:
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
             edited_df.to_excel(writer, index=False, sheet_name="Parsed Data")
-
         st.download_button("⬇️ Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
     else:
         st.info("No data available yet. Please upload files in the first tab.")
@@ -897,7 +846,4 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
-
-
-
-
+``
