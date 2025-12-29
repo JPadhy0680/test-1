@@ -136,6 +136,24 @@ def normalize_text(s: str) -> str:
     s = re.sub(r'\s+', ' ', s).strip()
     return s
 
+company_products = [
+    "abiraterone", "apixaban", "apremilast", "bexarotene",
+    "clobazam", "clonazepam", "cyanocobalamin", "dabigatran",
+    "dapagliflozin", "dimethyl fumarate", "famotidine",
+    "fesoterodine", "icatibant", "itraconazole", "linagliptin",
+    "linagliptin + metformin", "nintedanib", "pirfenidone",
+    "raltegravir", "ranolazine", "rivaroxaban", "saxagliptin",
+    "sitagliptin", "tamsulosin + solifenacin", "tapentadol",
+    "ticagrelor", "tamsulosin", "solifenacin",
+    "cyclogest", "progesterone", "luteum", "amelgen"
+]
+category2_products = {
+    "clobazam", "clonazepam", "cyanocobalamin",
+    "famotidine", "itraconazole",
+    "tamsulosin", "solifenacin",
+    "tapentadol", "cyclogest",
+    "progesterone", "luteum", "amelgen"
+}
 import re
 
 def get_optimized_matcher(company_products):
@@ -230,25 +248,6 @@ def detect_molecule_name_differ(raw_name: str, my_company: str, competitor_names
         if _re.search(r"[a-z]{3,}", tn):
             return True
     return False
-
-company_products = [
-    "abiraterone", "apixaban", "apremilast", "bexarotene",
-    "clobazam", "clonazepam", "cyanocobalamin", "dabigatran",
-    "dapagliflozin", "dimethyl fumarate", "famotidine",
-    "fesoterodine", "icatibant", "itraconazole", "linagliptin",
-    "linagliptin + metformin", "nintedanib", "pirfenidone",
-    "raltegravir", "ranolazine", "rivaroxaban", "saxagliptin",
-    "sitagliptin", "tamsulosin + solifenacin", "tapentadol",
-    "ticagrelor", "tamsulosin", "solifenacin",
-    "cyclogest", "progesterone", "luteum", "amelgen"
-]
-category2_products = {
-    "clobazam", "clonazepam", "cyanocobalamin",
-    "famotidine", "itraconazole",
-    "tamsulosin", "solifenacin",
-    "tapentadol", "cyclogest",
-    "progesterone", "luteum", "amelgen"
-}
 
 def parse_dd_mmm_yy(s):
     return datetime.strptime(s, "%d-%b-%y").date()
