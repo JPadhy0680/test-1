@@ -6,14 +6,16 @@ from datetime import datetime, timedelta, date
 import io
 import re
 import calendar
+from typing import Optional, Set, Tuple
 
 st.set_page_config(page_title="E2B_R3 XML Triage Application", layout="wide")
 st.markdown(""" """, unsafe_allow_html=True)
 st.title("📊🧠 E2B_R3 XML Triage Application 🛠️ 🚀")
 
 # Version header
-# v1.5.1-validity-check-fixed:
-# - Fixes malformed string and improves Non-company product detection when suspects present but none match Celix.
+# v1.5.2-validity-check-limited-to-displayed:
+# - Validity launch/date checks are restricted to ONLY the drugs shown in Product Detail (matched Celix products).
+# - Retains v1.5.1 fixes: malformed string corrected; suspects-but-no-Celix => Non-Valid (Non-company product).
 # - Listedness logic unchanged (event-level, LLT-based; omitted for Non-Valid cases).
 
 def _get_password():
@@ -80,7 +82,7 @@ def format_date(date_str: str) -> str:
     except Exception:
         return ""
 
-def parse_date_obj(date_str: str):
+def parse_date_obj(date_str: str) -> Optional[date]:
     if not date_str:
         return None
     digits = _digits_only(date_str)
@@ -146,7 +148,7 @@ def contains_company_product(text: str, company_products: list) -> str:
     return ""
 
 MG_PATTERN = re.compile(r"\((\d{1,3}(?:,\d{3})*\d+(?:\.\d{1,3})?)\)\s*mg\b", re.IGNORECASE)
-def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str):
+def extract_strength_mg(raw_text: str, dose_val: str, dose_unit: str) -> Optional[float]:
     if dose_val and dose_unit and dose_unit.lower() == "mg":
         try:
             return float(str(dose_val).replace(",", ""))
@@ -181,7 +183,7 @@ COMMON_FORM_WORDS = {
 }
 
 # Detect cases like: "Abiraterone [JANSSEN]" where molecule is ours but a non-Celix company tag appears
-def detect_molecule_name_differ(raw_name: str, my_company: str, competitor_names: set[str]) -> bool:
+def detect_molecule_name_differ(raw_name: str, my_company: str, competitor_names: Set[str]) -> bool:
     import re as _re
     if not raw_name:
         return False
@@ -271,7 +273,7 @@ LAUNCH_INFO = {
     "amelgen": ("launched", None),
 }
 
-def get_launch_date(product_name: str, strength_mg) -> date | None:
+def get_launch_date(product_name: str, strength_mg) -> Optional[date]:
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
     if not info:
@@ -287,7 +289,7 @@ def get_launch_date(product_name: str, strength_mg) -> date | None:
         return None
     return None
 
-def get_launch_status(product_name: str) -> str | None:
+def get_launch_status(product_name: str) -> Optional[str]:
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
     if not info:
@@ -297,7 +299,7 @@ def get_launch_status(product_name: str) -> str | None:
 MY_COMPANY_NAME = "celix"
 DEFAULT_COMPETITOR_NAMES = {"glenmark", "cipla", "sun pharma", "dr reddy", "dr. reddy", "torrent", "lupin", "intas", "mankind", "micro labs", "zydus"}
 
-def contains_competitor_name(lot_text: str, competitor_names: set[str]) -> bool:
+def contains_competitor_name(lot_text: str, competitor_names: Set[str]) -> bool:
     if not lot_text:
         return False
     norm = lot_text.lower()
@@ -334,7 +336,7 @@ with tab1:
     mapping_file = st.file_uploader("Upload LLT-PT Mapping Excel file", type=["xlsx"], help="Upload the MedDRA LLT-PT mapping Excel file.", key=f"map_uploader_{ver}")
     listed_ref_file = st.file_uploader("Upload Listedness Reference (Excel: columns 'Drug Name','LLT')", type=["xlsx"], help="Event-level listedness uses (Drug, LLT) pairs.", key=f"listed_ref_{ver}")
 
-    competitor_names = set(DEFAULT_COMPETITOR_NAMES)
+    competitor_names: Set[str] = set(DEFAULT_COMPETITOR_NAMES)
 
     mapping_df = None
     if mapping_file:
@@ -343,7 +345,7 @@ with tab1:
             mapping_df["LLT Code"] = mapping_df["LLT Code"].astype(str).str.strip()
 
     # Load Listedness Reference (Drug Name, LLT)
-    listed_pairs = set()
+    listed_pairs: Set[Tuple[str, str]] = set()
     if listed_ref_file:
         try:
             ref_df = pd.read_excel(listed_ref_file, engine="openpyxl")
@@ -361,7 +363,7 @@ with tab1:
         except Exception as e:
             st.error(f"Failed to read Listedness Reference Excel: {e}")
 
-    ref_drugs = {dn for (dn, lt) in listed_pairs} if listed_pairs else set()
+    ref_drugs: Set[str] = {dn for (dn, lt) in listed_pairs} if listed_pairs else set()
 
     seriousness_map = {
         "resultsInDeath": "Death",
@@ -495,10 +497,11 @@ with tab1:
 
             product_details_list = []
             case_has_category2 = False
-            case_drug_dates = []
+            case_drug_dates_all = []         # (prod, strength_mg, start_date_obj, stop_date_obj) for all suspects
+            case_drug_dates_display = []     # LIMITED to displayed product details (Celix matched & parts appended)
             case_event_dates = []
             case_mah_names = set()
-            case_products_norm = set()
+            case_products_norm: Set[str] = set()
             case_llts_norm = set()
 
             for drug in root.findall('.//hl7:substanceAdministration', ns):
@@ -544,13 +547,16 @@ with tab1:
                     stop_date_disp = clean_value(format_date(stop_date_str))
                     start_date_obj = parse_date_obj(start_date_str)
                     stop_date_obj = parse_date_obj(stop_date_str)
-                    case_drug_dates.append((matched_company_prod, strength_mg, start_date_obj, stop_date_obj))
+
+                    # Always keep a record of suspect drug dates in case we need later analysis
+                    case_drug_dates_all.append((matched_company_prod, strength_mg, start_date_obj, stop_date_obj))
 
                     mah_name_raw = get_mah_name_for_drug(drug, root, ns)
                     mah_name_clean = clean_value(mah_name_raw)
                     if mah_name_clean:
                         case_mah_names.add(mah_name_clean)
 
+                    # Build product details ONLY for Celix matched products
                     if matched_company_prod:
                         parts = []
                         display_name = raw_drug_text if raw_drug_text else matched_company_prod.title()
@@ -616,6 +622,8 @@ with tab1:
 
                         if parts:
                             product_details_list.append(" \n ".join(parts))
+                            # ➜ Add to the LIMITED set since this drug is displayed in Product Detail
+                            case_drug_dates_display.append((matched_company_prod, strength_mg, start_date_obj, stop_date_obj))
 
             seriousness_criteria = list(seriousness_map.keys())
             event_details_list = []
@@ -626,9 +634,9 @@ with tab1:
             # ----- Listedness assessment function (LLT-term based) -----
             def assess_event_listedness(
                 llt_norm: str,
-                suspect_products_norm: set[str],
-                listed_pairs_set: set[tuple[str, str]],
-                ref_drugs_set: set[str]
+                suspect_products_norm: Set[str],
+                listed_pairs_set: Set[Tuple[str, str]],
+                ref_drugs_set: Set[str]
             ) -> str:
                 # No reference uploaded at all
                 if not listed_pairs_set or not ref_drugs_set:
@@ -722,12 +730,12 @@ with tab1:
             else:
                 reportability = "Non-Reportable"
 
-            # -------- Validity assessment (FIXED) --------
-            validity_reason = None
+            # -------- Validity assessment (LIMITED to displayed drugs) --------
+            validity_reason: Optional[str] = None
 
             # Helper flags
             has_any_suspect = bool(suspect_ids)             # suspects found in the case (from XML)
-            has_celix_suspect = bool(case_products_norm)    # suspects that matched Celix product list
+            has_celix_suspect = bool(case_products_norm)    # suspects that matched Celix product list (and thus likely displayed)
 
             # 1) No patient details
             if not has_any_patient_detail:
@@ -742,18 +750,18 @@ with tab1:
                 if any(name and MY_COMPANY_NAME.lower() not in name.lower() for name in case_mah_names):
                     validity_reason = "Non-company product"
 
-            # 4) Product not launched (status yet/awaited)
+            # 4) Product not launched (status yet/awaited) — ONLY on displayed drugs
             if validity_reason is None:
-                for prod, strength_mg, sdt, edt in case_drug_dates:
+                for prod, strength_mg, sdt, edt in case_drug_dates_display:
                     status = get_launch_status(prod)
                     if status in ("yet", "awaited"):
                         validity_reason = "Product not Launched"
                         break
 
-            # 5) Dates before launch -> Drug exposure prior to Launch
+            # 5) Dates before launch -> Drug exposure prior to Launch — ONLY on displayed drugs
             if validity_reason is None:
                 launch_dates = []
-                for prod, strength_mg, sdt, edt in case_drug_dates:
+                for prod, strength_mg, sdt, edt in case_drug_dates_display:
                     ld = get_launch_date(prod, strength_mg)
                     if ld:
                         launch_dates.append(ld)
@@ -767,9 +775,9 @@ with tab1:
                             validity_reason = "Drug exposure prior to Launch"
                             break
 
-                    # Compare drug dates against launch
+                    # Compare drug dates against launch — ONLY displayed drugs
                     if validity_reason is None:
-                        for _, _, drug_start, drug_stop in case_drug_dates:
+                        for _, _, drug_start, drug_stop in case_drug_dates_display:
                             if (drug_start and drug_start < min_launch_dt) or (drug_stop and drug_stop < min_launch_dt):
                                 validity_reason = "Drug exposure prior to Launch"
                                 break
@@ -846,3 +854,4 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
