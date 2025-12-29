@@ -136,15 +136,30 @@ def normalize_text(s: str) -> str:
     s = re.sub(r'\s+', ' ', s).strip()
     return s
 
-def contains_company_product(text: str, company_products: list) -> str:
+import re
+
+def get_optimized_matcher(company_products):
+    # 1. Normalize and filter products once
+    # 2. Sort by length (descending) so "iPhone 15" matches before "iPhone"
+    valid_products = sorted(
+        [p for p in company_products if normalize_text(p)], 
+        key=len, 
+        reverse=True
+    )
+    
+    # 3. Create a single regex pattern: \b(prod1|prod2|prod3)\b
+    combined_pattern = r'\b(' + '|'.join(re.escape(normalize_text(p)) for p in valid_products) + r')\b'
+    return re.compile(combined_pattern), valid_products
+
+# Usage
+product_regex, sorted_prods = get_optimized_matcher(my_product_list)
+
+def contains_company_product_fast(text: str, product_regex, original_products_map) -> str:
     norm = normalize_text(text)
-    for prod in company_products:
-        pnorm = normalize_text(prod)
-        if not pnorm:
-            continue
-        pattern = r'\b' + re.escape(pnorm) + r'\b'
-        if re.search(pattern, norm):
-            return prod
+    match = product_regex.search(norm)
+    if match:
+        # Return the original casing/string if needed
+        return match.group(0) 
     return ""
 
 MG_PATTERN = re.compile(r"\((\d{1,3}(?:,\d{3})*\d+(?:\.\d{1,3})?)\)\s*mg\b", re.IGNORECASE)
