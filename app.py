@@ -13,7 +13,9 @@ st.markdown(""" """, unsafe_allow_html=True)
 st.title("📊🧠 E2B_R3 XML Triage Application 🛠️ 🚀")
 
 # Version header
-# v1.5.2-validity-check-limited-to-displayed:
+# v1.5.3-lot-verification-comment:
+# - Adds comment: 'Verify Lot No with Celix-Lot No List' whenever a real Lot number is present (alphanumeric, not nullFlavor).
+# - Retains v1.5.2 logic.
 # - Validity launch/date checks are restricted to ONLY the drugs shown in Product Detail (matched Celix products).
 # - Retains v1.5.1 fixes: malformed string corrected; suspects-but-no-Celix => Non-Valid (Non-company product).
 # - Listedness logic unchanged (event-level, LLT-based; omitted for Non-Valid cases).
@@ -601,6 +603,9 @@ with tab1:
                             lot_clean = clean_value(lot_elem.text)
                         if lot_clean:
                             parts.append(f"Lot No: {lot_clean}")
+    # If lot_clean contains any alphanumeric characters, add verification comment
+    if re.search(r'[A-Za-z0-9]', lot_clean):
+        comments.append('Verify Lot No with Celix-Lot No List')
 
                         if mah_name_clean:
                             parts.append(f"MAH: {mah_name_clean}")
@@ -854,6 +859,18 @@ with tab2:
 st.markdown("""
 **Developed by Jagamohan** _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
