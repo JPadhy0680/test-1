@@ -152,7 +152,7 @@ def get_optimized_matcher(company_products):
     return re.compile(combined_pattern), valid_products
 
 # Usage
-product_regex, sorted_prods = get_optimized_matcher(my_product_list)
+product_regex, sorted_prods = get_optimized_matcher(company_products)
 
 def contains_company_product_fast(text: str, product_regex, original_products_map) -> str:
     norm = normalize_text(text)
