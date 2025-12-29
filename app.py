@@ -603,9 +603,9 @@ with tab1:
                             lot_clean = clean_value(lot_elem.text)
                         if lot_clean:
                             parts.append(f"Lot No: {lot_clean}")
-    # If lot_clean contains any alphanumeric characters, add verification comment
-    if re.search(r'[A-Za-z0-9]', lot_clean):
-        comments.append('Verify Lot No with Celix-Lot No List')
+                        # If lot_clean contains any alphanumeric characters, add verification comment
+                        if re.search(r'[A-Za-z0-9]', lot_clean):
+                            comments.append('Verify Lot No with Celix-Lot No List')
 
                         if mah_name_clean:
                             parts.append(f"MAH: {mah_name_clean}")
