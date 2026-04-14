@@ -217,7 +217,7 @@ LAUNCH_INFO = {
     "nintedanib": ("yet", None),
     "pirfenidone": ("launched_by_strength", {
         267.0: parse_dd_mmm_yy("29-Jun-22"),
-        801.0: parse_dd_mmm_yy("29-Jun-22")
+        801.0: parse_dd_mmm_yy("29-Jun-22"),
         534.0: None 
     }),
     "raltegravir": ("yet", None),
