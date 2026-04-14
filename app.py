@@ -244,15 +244,25 @@ def get_launch_date(product_name: str, strength_mg) -> Optional[date]:
     info = LAUNCH_INFO.get(key)
     if not info:
         return None
+
     status, payload = info
+
     if status == "launched":
         return payload
+
     if status == "launched_by_strength":
         if isinstance(payload, dict) and payload:
             if strength_mg is not None:
-                return payload.get(strength_mg) if strength_mg in payload else payload.get(float(strength_mg))  # type: ignore
-            return min(payload.values())
-        return None
+                return (
+                    payload.get(strength_mg)
+                    if strength_mg in payload
+                    else payload.get(float(strength_mg))
+                )
+
+            # ✅ FIX: ignore None values
+            dates = [d for d in payload.values() if d is not None]
+            return min(dates) if dates else None
+
     return None
 
 def get_launch_status(product_name: str) -> Optional[str]:
