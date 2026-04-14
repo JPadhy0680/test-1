@@ -219,7 +219,7 @@ LAUNCH_INFO = {
         267.0: parse_dd_mmm_yy("29-Jun-22"),
         801.0: parse_dd_mmm_yy("29-Jun-22")
         534.0: "yet", None) 
-    })
+    }),
     "raltegravir": ("yet", None),
     "ranolazine": ("launched", parse_dd_mmm_yy("20-Jul-23")),
     "rivaroxaban": ("launched_by_strength", {
