@@ -201,7 +201,7 @@ LAUNCH_INFO = {
     "clobazam": ("launched_by_strength", {
         10.0: parse_dd_mmm_yy("26-Sep-24"),
         20.0: None 
-    })
+    }),
     "cyanocobalamin": ("awaited", None),
     "dabigatran": ("yet", None),
     "dapagliflozin": ("launched_by_strength", {10.0: parse_dd_mmm_yy("26-Aug-25"), 5.0: parse_dd_mmm_yy("10-Sep-25")}),
