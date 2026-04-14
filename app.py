@@ -200,7 +200,7 @@ LAUNCH_INFO = {
     "clonazepam": ("launched", parse_dd_mmm_yy("20-Jan-25")),
     "clobazam": ("launched_by_strength", {
         10.0: parse_dd_mmm_yy("26-Sep-24"),
-        20.0: "yet", None) 
+        20.0: None 
     })
     "cyanocobalamin": ("awaited", None),
     "dabigatran": ("yet", None),
@@ -218,7 +218,7 @@ LAUNCH_INFO = {
     "pirfenidone": ("launched_by_strength", {
         267.0: parse_dd_mmm_yy("29-Jun-22"),
         801.0: parse_dd_mmm_yy("29-Jun-22")
-        534.0: "yet", None) 
+        534.0: None 
     }),
     "raltegravir": ("yet", None),
     "ranolazine": ("launched", parse_dd_mmm_yy("20-Jul-23")),
