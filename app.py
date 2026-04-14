@@ -177,17 +177,15 @@ def contains_competitor_name(lot_text: str, competitor_names: Set[str]) -> bool:
 
 company_products = [
     "abiraterone", "apixaban", "apremilast", "bexarotene", "clobazam", "clonazepam",
-    "cyanocobalamin", "dabigatran", "dapagliflozin", "dimethyl fumarate", "famotidine",
-    "fesoterodine", "icatibant", "itraconazole", "linagliptin", "linagliptin + metformin",
-    "nintedanib", "pirfenidone", "raltegravir", "ranolazine", "rivaroxaban", "saxagliptin",
-    "sitagliptin", "tamsulosin + solifenacin", "tapentadol", "ticagrelor", "tamsulosin",
-    "solifenacin", "cyclogest", "progesterone", "luteum", "amelgen"
+    "cyanocobalamin", "dabigatran", "dapagliflozin", "dimethyl fumarate", "edoxaban", "empagliflozin", "famotidine",
+    "fesoterodine", "icatibant", "itraconazole", "linagliptin", "linagliptin + metformin", "metformin", "nintedanib", "pirfenidone", "raltegravir", "ranolazine", "rivaroxaban", "safinamide", "saxagliptin",
+    "sitagliptin", "sacubritril + valsartan", "sacubritril", "valsartan", "tamsulosin + solifenacin", "tapentadol", "ticagrelor", "tamsulosin",
+    "solifenacin"
 ]
 
 category2_products = {
     "clobazam", "clonazepam", "cyanocobalamin", "famotidine", "itraconazole",
-    "tamsulosin", "solifenacin", "tapentadol", "cyclogest", "progesterone",
-    "luteum", "amelgen"
+    "tamsulosin", "solifenacin", "tapentadol"
 }
 
 def parse_dd_mmm_yy(s):
@@ -196,23 +194,33 @@ def parse_dd_mmm_yy(s):
 LAUNCH_INFO = {
     "abiraterone": ("launched", parse_dd_mmm_yy("08-Sep-22")),
     "apixaban": ("launched", parse_dd_mmm_yy("26-Feb-25")),
-    "apremilast": ("yet", None),
+    "apremilast": ("launched", parse_dd_mmm_yy("19-Jan-26")),
     "bexarotene": ("launched", parse_dd_mmm_yy("19-Jan-23")),
     "clobazam": ("launched", parse_dd_mmm_yy("26-Sep-24")),
     "clonazepam": ("launched", parse_dd_mmm_yy("20-Jan-25")),
+    "clobazam": ("launched_by_strength", {
+        10.0: parse_dd_mmm_yy("26-Sep-24"),
+        20.0: "yet", None) 
+    })
     "cyanocobalamin": ("awaited", None),
     "dabigatran": ("yet", None),
     "dapagliflozin": ("launched_by_strength", {10.0: parse_dd_mmm_yy("26-Aug-25"), 5.0: parse_dd_mmm_yy("10-Sep-25")}),
     "dimethyl fumarate": ("launched", parse_dd_mmm_yy("05-Feb-24")),
+    "edoxaban": ("awaited", None),
+    "empagliflozin: ("awaited", None),
     "famotidine": ("launched", parse_dd_mmm_yy("21-Feb-25")),
     "fesoterodine": ("yet", None),
     "icatibant": ("launched", parse_dd_mmm_yy("28-Jul-22")),
     "itraconazole": ("awaited", None),
     "linagliptin": ("yet", None),
-    "linagliptin + metformin": ("awaited", None),
-    "nintedanib": ("awaited", None),
-    "pirfenidone": ("launched", parse_dd_mmm_yy("29-Jun-22")),
-    "raltegravir": ("awaited", None),
+    "linagliptin + metformin": ("yet", None),
+    "nintedanib": ("yet", None),
+    "pirfenidone": ("launched_by_strength", {
+        267.0: parse_dd_mmm_yy("29-Jun-22"),
+        801.0: parse_dd_mmm_yy("29-Jun-22")
+        534.0: "yet", None) 
+    })
+    "raltegravir": ("yet", None),
     "ranolazine": ("launched", parse_dd_mmm_yy("20-Jul-23")),
     "rivaroxaban": ("launched_by_strength", {
         2.5: parse_dd_mmm_yy("02-Apr-24"),
@@ -220,18 +228,16 @@ LAUNCH_INFO = {
         15.0: parse_dd_mmm_yy("23-May-24"),
         20.0: parse_dd_mmm_yy("23-May-24")
     }),
+    "safinamide": ("yet", None), 
     "saxagliptin": ("yet", None),
-    "sitagliptin": ("yet", None),
+    "sitagliptin": ("launched", parse_dd_mmm_yy("12-Mar-26")),
+    "sacubritril + valsartan": ("awaited", None),
     "tamsulosin + solifenacin": ("launched", parse_dd_mmm_yy("08-May-23")),
     "tamsulosin": ("launched", parse_dd_mmm_yy("08-May-23")),
     "solifenacin": ("launched", parse_dd_mmm_yy("08-May-23")),
     "tapentadol": ("launched", parse_dd_mmm_yy("01-Feb-24")),
     "ticagrelor": ("yet", None),
-    "cyclogest": ("launched", None),
-    "progesterone": ("launched", None),
-    "luteum": ("launched", None),
-    "amelgen": ("launched", None),
-}
+    }
 
 def get_launch_date(product_name: str, strength_mg) -> Optional[date]:
     key = normalize_text(product_name)
