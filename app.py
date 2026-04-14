@@ -207,7 +207,7 @@ LAUNCH_INFO = {
     "dapagliflozin": ("launched_by_strength", {10.0: parse_dd_mmm_yy("26-Aug-25"), 5.0: parse_dd_mmm_yy("10-Sep-25")}),
     "dimethyl fumarate": ("launched", parse_dd_mmm_yy("05-Feb-24")),
     "edoxaban": ("awaited", None),
-    "empagliflozin: ("awaited", None),
+    "empagliflozin": ("awaited", None),
     "famotidine": ("launched", parse_dd_mmm_yy("21-Feb-25")),
     "fesoterodine": ("yet", None),
     "icatibant": ("launched", parse_dd_mmm_yy("28-Jul-22")),
