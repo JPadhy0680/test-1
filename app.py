@@ -176,7 +176,7 @@ def contains_competitor_name(lot_text: str, competitor_names: Set[str]) -> bool:
     return False
 
 company_products = [
-    "abiraterone", "apixaban", "apremilast", "bexarotene", "clobazam", "clonazepam",
+    "abiraterone", "apixaban", "apremilast", "bexarotene", "brivaracetam", "clobazam", "clonazepam",
     "cyanocobalamin", "dabigatran", "dapagliflozin", "dimethyl fumarate", "edoxaban", "empagliflozin", "famotidine",
     "fesoterodine", "icatibant", "itraconazole", "linagliptin", "linagliptin + metformin", "metformin", "nintedanib", "pirfenidone", "raltegravir", "ranolazine", "rivaroxaban", "safinamide", "saxagliptin",
     "sitagliptin", "sacubritril + valsartan", "sacubritril", "valsartan", "tamsulosin + solifenacin", "tapentadol", "ticagrelor", "tamsulosin",
@@ -196,6 +196,7 @@ LAUNCH_INFO = {
     "apixaban": ("launched", parse_dd_mmm_yy("26-Feb-25")),
     "apremilast": ("launched", parse_dd_mmm_yy("19-Jan-26")),
     "bexarotene": ("launched", parse_dd_mmm_yy("19-Jan-23")),
+    "brivaracetam": ("awaited", None),
     "clobazam": ("launched", parse_dd_mmm_yy("26-Sep-24")),
     "clonazepam": ("launched", parse_dd_mmm_yy("20-Jan-25")),
     "clobazam": ("launched_by_strength", {
