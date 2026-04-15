@@ -464,7 +464,7 @@ with tab1:
                 patient_parts.append(f"Record No: {patient_record_no}")
             patient_detail = ", ".join(patient_parts)
 
-            has_any_patient_detail = any([patient_initials, gender, age_group, age, height, weight])
+            has_any_patient_detail = any([patient_initials, gender, age_group, age, height, weight,patient_record_no])
 
             # Identify suspect products (value==1)
             suspect_ids: List[str] = []
