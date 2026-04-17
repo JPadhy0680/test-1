@@ -771,12 +771,57 @@ with tab1:
                 if any(name and MY_COMPANY_NAME.lower() not in name.lower() for name in case_displayed_mahs):
                     validity_reason = "Non-company product"
 
-            if validity_reason is None:
+            # --------------------- VALIDITY LOGIC (UPDATED) ---------------------
+
+            validity_reason: Optional[str] = None
+            validity_comment: Optional[str] = None
+            
+            has_any_suspect = bool(suspect_ids)
+            has_celix_suspect = bool(case_products_norm)
+            
+            # Rule 1: Patient details
+            if not has_any_patient_detail:
+                validity_reason = "No patient details"
+            
+            # Rule 2: Suspect but non-company
+            if validity_reason is None and has_any_suspect and not has_celix_suspect:
+                validity_reason = "Non-company product"
+            
+            # Rule 3: MAH check
+            if validity_reason is None and case_displayed_mahs:
+                if any(
+                    name and MY_COMPANY_NAME.lower() not in name.lower()
+                    for name in case_displayed_mahs
+                ):
+                    validity_reason = "Non-company product"
+            
+            # Rule 4: Product launch status (FIXED for multi-drug)
+            if validity_reason is None and case_drug_dates_display:
+            
+                any_valid_drug = False
+                non_valid_products = []
+            
                 for prod, strength_mg, sdt, edt in case_drug_dates_display:
                     status = get_launch_status(prod)
+            
                     if status in ("yet", "awaited"):
-                        validity_reason = "Product not Launched"
-                        break
+                        non_valid_products.append(prod)
+                    else:
+                        any_valid_drug = True
+            
+                # Case-level decision
+                if not any_valid_drug:
+                    # ALL suspect drugs are non-valid
+                    validity_reason = "Product not Launched"
+                else:
+                    # Mixed validity → case is VALID
+                    if non_valid_products:
+                        non_valid_list = ", ".join(sorted(set(non_valid_products)))
+                        validity_comment = (
+                            "Note: The following suspect drug(s) were assessed as non-valid "
+                            f"due to launch status: {non_valid_list}. "
+                            "Case validity is based on the presence of at least one valid suspect drug."
+                        )
 
             earliest_launch_dt = None
             for prod, strength_mg, sdt, edt in case_drug_dates_display:
