@@ -215,6 +215,7 @@ LAUNCH_INFO = {
     "itraconazole": ("awaited", None),
     "linagliptin": ("yet", None),
     "linagliptin + metformin": ("yet", None),
+    "metformin": ("yet", None),
     "nintedanib": ("yet", None),
     "pirfenidone": ("launched_by_strength", {
         267.0: parse_dd_mmm_yy("29-Jun-22"),
