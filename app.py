@@ -232,7 +232,10 @@ LAUNCH_INFO = {
         20.0: parse_dd_mmm_yy("23-May-24")
     }),
     "safinamide": ("yet", None), 
-    "saxagliptin": ("yet", None),
+    "saxagliptin": ("launched_by_strength", {
+        5.0: parse_dd_mmm_yy("17-Apr-26"),
+        2.5: None 
+    }),
     "sitagliptin": ("launched", parse_dd_mmm_yy("12-Mar-26")),
     "sacubritril + valsartan": ("awaited", None),
     "tamsulosin + solifenacin": ("launched", parse_dd_mmm_yy("08-May-23")),
