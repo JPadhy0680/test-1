@@ -217,7 +217,7 @@ LAUNCH_INFO = {
     "linagliptin": ("yet", None),
     "linagliptin + metformin": ("yet", None),
     "metformin": ("yet", None),
-    "nintedanib": ("yet", None),
+    "nintedanib": ("launched", parse_dd_mmm_yy("28-Apr-26")),
     "pirfenidone": ("launched_by_strength", {
         267.0: parse_dd_mmm_yy("29-Jun-22"),
         801.0: parse_dd_mmm_yy("29-Jun-22"),
@@ -231,7 +231,7 @@ LAUNCH_INFO = {
         15.0: parse_dd_mmm_yy("23-May-24"),
         20.0: parse_dd_mmm_yy("23-May-24")
     }),
-    "safinamide": ("yet", None), 
+    "safinamide": ("launched", parse_dd_mmm_yy("28-Apr-26")), 
     "saxagliptin": ("launched_by_strength", {
         5.0: parse_dd_mmm_yy("17-Apr-26"),
         2.5: None 
