@@ -14,7 +14,7 @@ st.markdown(""" """, unsafe_allow_html=True)
 st.title("\U0001F4CA\U0001F9E0 E2B_R3 XML Triage Application \U0001F6E0\ufe0f \U0001F680")
 
 # ---------------------------------------------------------------------------------------------------------
-# v1.10.3 - per-product event-wise listedness display, password removed, no debug prints
+# v1.10.6 - strength considered only from XML ingredient field and product name; dosage/dose ignored
 # - Event Details column shows ONLY clinical details (no "Listedness:" fragments).
 # - Listedness column:
 #    * If exactly one Celix suspect product: show per-event lines (e.g., "Event 1: Listed").
@@ -245,10 +245,160 @@ LAUNCH_INFO = {
     "ticagrelor": ("yet", None),
     }
 
+# Strength master list supplied by Jagamohan (values are in mg).
+# Single-ingredient products use single-number tuples, e.g. (5.0,).
+# Combination products use ordered tuples exactly as normally written in the product strength, e.g. (2.5, 850.0).
+PRODUCT_STRENGTHS_MG: Dict[str, Set[Tuple[float, ...]]] = {
+    "abiraterone": {(500.0,)},
+    "apixaban": {(2.5,), (5.0,)},
+    "apremilast": {(10.0,), (20.0,), (30.0,)},
+    "bexarotene": {(75.0,)},
+    "brivaracetam": {(10.0,), (25.0,), (50.0,), (75.0,), (100.0,)},
+    "clobazam": {(10.0,)},
+    "clonazepam": {(0.5,), (2.0,)},
+    "cyanocobalamin": {(1.0,)},
+    "dabigatran": {(75.0,), (110.0,), (150.0,)},
+    "dapagliflozin": {(5.0,), (10.0,)},
+    "dapagliflozine": {(5.0,), (10.0,)},
+    "dimethyl fumarate": {(120.0,), (240.0,)},
+    "edoxaban": {(15.0,), (30.0,), (60.0,)},
+    "empagliflozin": {(10.0,), (25.0,)},
+    "famotidine": {(20.0,), (40.0,)},
+    "fesoterodine": {(4.0,), (8.0,)},
+    "icatibant": {(30.0,)},
+    "itraconazole": {(100.0,)},
+    "linagliptin": {(5.0,)},
+    "linagliptin + metformin": {(2.5, 850.0), (2.5, 1000.0)},
+    "metformin": {(850.0,), (1000.0,)},
+    "nintedanib": {(100.0,), (150.0,)},
+    "pirfenidone": {(267.0,), (801.0,)},
+    "raltegravir": {(600.0,)},
+    "ranolazine": {(375.0,), (500.0,), (750.0,)},
+    "rivaroxaban": {(2.5,), (10.0,), (15.0,), (20.0,)},
+    "safinamide": {(50.0,), (100.0,)},
+    "saxagliptin": {(2.5,), (5.0,)},
+    "sitagliptin": {(25.0,), (50.0,), (100.0,)},
+    "sacubritril + valsartan": {(24.0, 26.0), (49.0, 51.0), (97.0, 103.0)},
+    "sacubitril + valsartan": {(24.0, 26.0), (49.0, 51.0), (97.0, 103.0)},
+    "sacubritril": {(24.0,), (49.0,), (97.0,)},
+    "valsartan": {(26.0,), (51.0,), (103.0,)},
+    "tamsulosin + solifenacin": {(6.0, 0.4)},
+    "tamsulosin": {(0.4,)},
+    "solifenacin": {(6.0,)},
+    "tapentadol": {(50.0,), (100.0,), (150.0,), (200.0,), (250.0,)},
+    "ticagrelor": {(60.0,), (90.0,)},
+}
+
+
+def _norm_strength_number(num: float) -> float:
+    """Normalize strength numbers so 10 and 10.0 compare equally."""
+    try:
+        return round(float(num), 6)
+    except Exception:
+        return num
+
+
+def _norm_strength_tuple(values) -> Tuple[float, ...]:
+    return tuple(_norm_strength_number(v) for v in values)
+
+
+def extract_strengths_mg(*texts: str) -> Tuple[float, ...]:
+    """Extract mg strengths from product name only when called with product-name text.
+
+    Examples handled: "5 mg", "10mg", "2.5 mg / 850 mg", "24mg/26mg".
+    Returns strengths in the order found. If no mg strength is found, returns an empty tuple.
+    """
+    combined = " ".join(str(t or "") for t in texts)
+    if not combined.strip():
+        return tuple()
+    combined = combined.replace("&amp;", "&").replace("&", " ")
+    combined = combined.replace("/", " / ").replace("+", " + ").replace(",", " , ")
+    values = []
+    for m in re.finditer(r'(?<![A-Za-z0-9])([0-9]+(?:\.[0-9]+)?)\s*mg\b', combined, flags=re.IGNORECASE):
+        values.append(_norm_strength_number(float(m.group(1))))
+    return tuple(values)
+
+
+def extract_ingredient_strengths_mg(drug, ns) -> Tuple[float, ...]:
+    """Extract strength from XML ingredient quantity numerator fields only."""
+    values = []
+    numerator_paths = [
+        './/hl7:kindOfProduct/hl7:manufacturedProduct/hl7:ingredient/hl7:quantity/hl7:numerator',
+        './/hl7:manufacturedProduct/hl7:ingredient/hl7:quantity/hl7:numerator',
+        './/hl7:ingredient/hl7:quantity/hl7:numerator',
+    ]
+    seen = set()
+    for path in numerator_paths:
+        for numerator in drug.findall(path, ns):
+            value = numerator.attrib.get('value', '')
+            unit = numerator.attrib.get('unit', '')
+            key = (value, unit)
+            if key in seen:
+                continue
+            seen.add(key)
+            if value and str(unit).strip().lower() == 'mg':
+                try:
+                    values.append(_norm_strength_number(float(value)))
+                except Exception:
+                    pass
+    return tuple(values)
+
+
+def allowed_strengths_for_product(product_name: str) -> Set[Tuple[float, ...]]:
+    return PRODUCT_STRENGTHS_MG.get(normalize_text(product_name), set())
+
+
+def is_strength_allowed_for_product(product_name: str, observed_strengths) -> bool:
+    """Return True when observed strength is absent or matches the supplied strength master list."""
+    allowed = allowed_strengths_for_product(product_name)
+    if not allowed:
+        return True
+    if observed_strengths is None:
+        return True
+    if isinstance(observed_strengths, (int, float)):
+        observed = (_norm_strength_number(observed_strengths),)
+    else:
+        observed = _norm_strength_tuple(observed_strengths)
+    if not observed:
+        return True
+    if observed in allowed:
+        return True
+    if all(len(a) == 1 for a in allowed):
+        allowed_single_values = {a[0] for a in allowed}
+        return all(v in allowed_single_values for v in observed)
+    return False
+
+
+def format_strength_tuple(strengths) -> str:
+    if strengths is None:
+        return ""
+    if isinstance(strengths, (int, float)):
+        strengths = (strengths,)
+    out = []
+    for v in strengths:
+        fv = float(v)
+        out.append(str(int(fv)) if fv.is_integer() else str(fv))
+    return " / ".join(out) + " mg" if out else ""
+
+
+def strength_comment_for_product(product_name: str, observed_strengths) -> str:
+    """Return comment text when observed strength is outside the master strength list."""
+    if observed_strengths and not is_strength_allowed_for_product(product_name, observed_strengths):
+        allowed = allowed_strengths_for_product(product_name)
+        allowed_text = ", ".join(sorted(format_strength_tuple(a) for a in allowed)) if allowed else "not configured"
+        return (
+            f"Product strength mismatch for {product_name}: extracted "
+            f"{format_strength_tuple(observed_strengths)}; allowed strength(s): {allowed_text}."
+        )
+    return ""
+
 def get_launch_date(product_name: str, strength_mg) -> Optional[date]:
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
     if not info:
+        return None
+
+    if not is_strength_allowed_for_product(product_name, strength_mg):
         return None
 
     status, payload = info
@@ -259,13 +409,15 @@ def get_launch_date(product_name: str, strength_mg) -> Optional[date]:
     if status == "launched_by_strength":
         if isinstance(payload, dict) and payload:
             if strength_mg is not None:
-                return (
-                    payload.get(strength_mg)
-                    if strength_mg in payload
-                    else payload.get(float(strength_mg))
-                )
-
-            # ✅ FIX: ignore None values
+                if isinstance(strength_mg, (tuple, list)):
+                    strength_key = strength_mg[0] if strength_mg else None
+                else:
+                    strength_key = strength_mg
+                if strength_key is not None:
+                    try:
+                        return payload.get(strength_key) if strength_key in payload else payload.get(float(strength_key))
+                    except Exception:
+                        return None
             dates = [d for d in payload.values() if d is not None]
             return min(dates) if dates else None
 
@@ -591,6 +743,31 @@ with tab1:
                         if form_clean:
                             parts.append(f"Formulation: {form_clean}")
 
+                        ingredient_strengths = extract_ingredient_strengths_mg(drug, ns)
+                        product_name_strengths = extract_strengths_mg(display_name_for_detail)
+
+                        # Strength source rule:
+                        # 1) XML ingredient numerator strength is the primary source.
+                        # 2) Product-name strength is used only if XML ingredient strength is absent.
+                        # 3) Dosage, dose quantity, and formulation text are intentionally ignored.
+                        observed_strengths = ingredient_strengths or product_name_strengths
+
+                        if ingredient_strengths:
+                            parts.append(f"Ingredient Strength: {format_strength_tuple(ingredient_strengths)}")
+                        if product_name_strengths:
+                            parts.append(f"Product Name Strength: {format_strength_tuple(product_name_strengths)}")
+
+                        if ingredient_strengths and product_name_strengths and ingredient_strengths != product_name_strengths:
+                            comments.append(
+                                f"Product strength mismatch between XML ingredient field and product name for {display_name_for_detail}: "
+                                f"ingredient strength {format_strength_tuple(ingredient_strengths)} vs "
+                                f"product name strength {format_strength_tuple(product_name_strengths)}."
+                            )
+
+                        strength_comment = strength_comment_for_product(matched_company_prod, observed_strengths)
+                        if strength_comment:
+                            comments.append(strength_comment)
+
                         lot_elem = drug.find('.//hl7:lotNumberText', ns)
                         lot_clean = ""
                         if lot_elem is not None and lot_elem.text:
@@ -627,7 +804,7 @@ with tab1:
                             if status in ("yet", "awaited"):
                                 non_valid_reason = "Product not Launched"
                             else:
-                                launch_dt = get_launch_date(matched_company_prod, None)
+                                launch_dt = get_launch_date(matched_company_prod, observed_strengths)
                                 exposure_reasons = []
                                 # We'll use FRD/LRD computed later
                                 drug_prior = (start_date_obj and start_date_obj < (launch_dt or start_date_obj)) if launch_dt else False
@@ -637,7 +814,7 @@ with tab1:
                                     non_valid_reason = f"Drug exposure prior to Launch; {', '.join(sorted(set(exposure_reasons)))}"
                         displayed_drugs_assessment.append((display_name_for_detail or "Unknown product", non_valid_reason))
 
-                        case_drug_dates_display.append((matched_company_prod, None, start_date_obj, None))
+                        case_drug_dates_display.append((matched_company_prod, observed_strengths, start_date_obj, None))
 
             seriousness_criteria = list(seriousness_map.keys())
             event_details_list: List[str] = []
@@ -965,38 +1142,3 @@ st.markdown("""
 **Developed by Jagamohan**
 _Disclaimer: App is in developmental stage, validate before using the data._
 """, unsafe_allow_html=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
