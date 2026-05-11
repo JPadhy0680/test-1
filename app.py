@@ -4,8 +4,10 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import datetime, date
 import io
+import zipfile
 import re
 import calendar
+from pathlib import Path
 from typing import Optional, Set, Tuple, List, Dict
 
 st.set_page_config(page_title="E2B_R3 XML Triage Application", layout="wide")
@@ -14,7 +16,7 @@ st.markdown(""" """, unsafe_allow_html=True)
 st.title("\U0001F4CA\U0001F9E0 E2B_R3 XML Triage Application \U0001F6E0\ufe0f \U0001F680")
 
 # ---------------------------------------------------------------------------------------------------------
-# v1.10.6 - strength considered only from XML ingredient field and product name; dosage/dose ignored
+# v1.10.9 - editable validity + revised XML naming convention + molecule-only filenames
 # - Event Details column shows ONLY clinical details (no "Listedness:" fragments).
 # - Listedness column:
 #    * If exactly one Celix suspect product: show per-event lines (e.g., "Event 1: Listed").
@@ -32,7 +34,7 @@ with st.expander("\U0001F4D6 Instructions"):
   We will compute **Listedness per event** and show it in a separate **Listedness** column.
 - If the case has **2 or more Celix suspect products**, the **Listedness** column shows one line per product:
   `Drug X - Event 1: Listed; Event 2: Unlisted; ...`
-- Parsed data appears in the **Export & Edit** tab. **All columns are read-only.**
+- Parsed data appears in the **Export & Edit** tab. **Validity** is editable; other columns are read-only.
 """)
 
 def _digits_only(s: str) -> str:
@@ -246,173 +248,126 @@ LAUNCH_INFO = {
     }
 
 # Strength master list supplied by Jagamohan (values are in mg).
-# Single-ingredient products use single-number tuples, e.g. (5.0,).
-# Combination products use ordered tuples exactly as normally written in the product strength, e.g. (2.5, 850.0).
 PRODUCT_STRENGTHS_MG: Dict[str, Set[Tuple[float, ...]]] = {
-    "abiraterone": {(500.0,)},
-    "apixaban": {(2.5,), (5.0,)},
-    "apremilast": {(10.0,), (20.0,), (30.0,)},
-    "bexarotene": {(75.0,)},
-    "brivaracetam": {(10.0,), (25.0,), (50.0,), (75.0,), (100.0,)},
-    "clobazam": {(10.0,)},
-    "clonazepam": {(0.5,), (2.0,)},
-    "cyanocobalamin": {(1.0,)},
-    "dabigatran": {(75.0,), (110.0,), (150.0,)},
-    "dapagliflozin": {(5.0,), (10.0,)},
-    "dapagliflozine": {(5.0,), (10.0,)},
-    "dimethyl fumarate": {(120.0,), (240.0,)},
-    "edoxaban": {(15.0,), (30.0,), (60.0,)},
-    "empagliflozin": {(10.0,), (25.0,)},
-    "famotidine": {(20.0,), (40.0,)},
-    "fesoterodine": {(4.0,), (8.0,)},
-    "icatibant": {(30.0,)},
-    "itraconazole": {(100.0,)},
-    "linagliptin": {(5.0,)},
-    "linagliptin + metformin": {(2.5, 850.0), (2.5, 1000.0)},
-    "metformin": {(850.0,), (1000.0,)},
-    "nintedanib": {(100.0,), (150.0,)},
-    "pirfenidone": {(267.0,), (801.0,)},
-    "raltegravir": {(600.0,)},
-    "ranolazine": {(375.0,), (500.0,), (750.0,)},
-    "rivaroxaban": {(2.5,), (10.0,), (15.0,), (20.0,)},
-    "safinamide": {(50.0,), (100.0,)},
-    "saxagliptin": {(2.5,), (5.0,)},
-    "sitagliptin": {(25.0,), (50.0,), (100.0,)},
-    "sacubritril + valsartan": {(24.0, 26.0), (49.0, 51.0), (97.0, 103.0)},
-    "sacubitril + valsartan": {(24.0, 26.0), (49.0, 51.0), (97.0, 103.0)},
-    "sacubritril": {(24.0,), (49.0,), (97.0,)},
-    "valsartan": {(26.0,), (51.0,), (103.0,)},
-    "tamsulosin + solifenacin": {(6.0, 0.4)},
-    "tamsulosin": {(0.4,)},
-    "solifenacin": {(6.0,)},
-    "tapentadol": {(50.0,), (100.0,), (150.0,), (200.0,), (250.0,)},
-    "ticagrelor": {(60.0,), (90.0,)},
+    "abiraterone": {(500.0,)}, "apixaban": {(2.5,), (5.0,)}, "apremilast": {(10.0,), (20.0,), (30.0,)},
+    "bexarotene": {(75.0,)}, "brivaracetam": {(10.0,), (25.0,), (50.0,), (75.0,), (100.0,)},
+    "clobazam": {(10.0,)}, "clonazepam": {(0.5,), (2.0,)}, "cyanocobalamin": {(1.0,)},
+    "dabigatran": {(75.0,), (110.0,), (150.0,)}, "dapagliflozin": {(5.0,), (10.0,)}, "dapagliflozine": {(5.0,), (10.0,)},
+    "dimethyl fumarate": {(120.0,), (240.0,)}, "edoxaban": {(15.0,), (30.0,), (60.0,)}, "empagliflozin": {(10.0,), (25.0,)},
+    "famotidine": {(20.0,), (40.0,)}, "fesoterodine": {(4.0,), (8.0,)}, "icatibant": {(30.0,)}, "itraconazole": {(100.0,)},
+    "linagliptin": {(5.0,)}, "linagliptin + metformin": {(2.5, 850.0), (2.5, 1000.0)}, "metformin": {(850.0,), (1000.0,)},
+    "nintedanib": {(100.0,), (150.0,)}, "pirfenidone": {(267.0,), (801.0,)}, "raltegravir": {(600.0,)},
+    "ranolazine": {(375.0,), (500.0,), (750.0,)}, "rivaroxaban": {(2.5,), (10.0,), (15.0,), (20.0,)},
+    "safinamide": {(50.0,), (100.0,)}, "saxagliptin": {(2.5,), (5.0,)}, "sitagliptin": {(25.0,), (50.0,), (100.0,)},
+    "sacubritril + valsartan": {(24.0, 26.0), (49.0, 51.0), (97.0, 103.0)}, "sacubitril + valsartan": {(24.0, 26.0), (49.0, 51.0), (97.0, 103.0)},
+    "sacubritril": {(24.0,), (49.0,), (97.0,)}, "valsartan": {(26.0,), (51.0,), (103.0,)},
+    "tamsulosin + solifenacin": {(6.0, 0.4)}, "tamsulosin": {(0.4,)}, "solifenacin": {(6.0,)},
+    "tapentadol": {(50.0,), (100.0,), (150.0,), (200.0,), (250.0,)}, "ticagrelor": {(60.0,), (90.0,)},
 }
 
-
 def _norm_strength_number(num: float) -> float:
-    """Normalize strength numbers so 10 and 10.0 compare equally."""
-    try:
-        return round(float(num), 6)
-    except Exception:
-        return num
-
+    try: return round(float(num), 6)
+    except Exception: return num
 
 def _norm_strength_tuple(values) -> Tuple[float, ...]:
     return tuple(_norm_strength_number(v) for v in values)
 
-
 def extract_strengths_mg(*texts: str) -> Tuple[float, ...]:
-    """Extract mg strengths from product name only when called with product-name text.
-
-    Examples handled: "5 mg", "10mg", "2.5 mg / 850 mg", "24mg/26mg".
-    Returns strengths in the order found. If no mg strength is found, returns an empty tuple.
-    """
     combined = " ".join(str(t or "") for t in texts)
-    if not combined.strip():
-        return tuple()
-    combined = combined.replace("&amp;", "&").replace("&", " ")
-    combined = combined.replace("/", " / ").replace("+", " + ").replace(",", " , ")
-    values = []
-    for m in re.finditer(r'(?<![A-Za-z0-9])([0-9]+(?:\.[0-9]+)?)\s*mg\b', combined, flags=re.IGNORECASE):
-        values.append(_norm_strength_number(float(m.group(1))))
-    return tuple(values)
-
+    if not combined.strip(): return tuple()
+    combined = combined.replace("&amp;", "&").replace("&", " ").replace("/", " / ").replace("+", " + ").replace(",", " , ")
+    return tuple(_norm_strength_number(float(m.group(1))) for m in re.finditer(r'(?<![A-Za-z0-9])([0-9]+(?:\.[0-9]+)?)\s*mg\b', combined, flags=re.IGNORECASE))
 
 def extract_ingredient_strengths_mg(drug, ns) -> Tuple[float, ...]:
-    """Extract strength from XML ingredient quantity numerator fields only."""
-    values = []
+    values, seen = [], set()
     numerator_paths = [
         './/hl7:kindOfProduct/hl7:manufacturedProduct/hl7:ingredient/hl7:quantity/hl7:numerator',
         './/hl7:manufacturedProduct/hl7:ingredient/hl7:quantity/hl7:numerator',
         './/hl7:ingredient/hl7:quantity/hl7:numerator',
     ]
-    seen = set()
     for path in numerator_paths:
         for numerator in drug.findall(path, ns):
             value = numerator.attrib.get('value', '')
             unit = numerator.attrib.get('unit', '')
             key = (value, unit)
-            if key in seen:
-                continue
+            if key in seen: continue
             seen.add(key)
             if value and str(unit).strip().lower() == 'mg':
-                try:
-                    values.append(_norm_strength_number(float(value)))
-                except Exception:
-                    pass
+                try: values.append(_norm_strength_number(float(value)))
+                except Exception: pass
     return tuple(values)
-
 
 def allowed_strengths_for_product(product_name: str) -> Set[Tuple[float, ...]]:
     return PRODUCT_STRENGTHS_MG.get(normalize_text(product_name), set())
 
-
 def is_strength_allowed_for_product(product_name: str, observed_strengths) -> bool:
-    """Return True when observed strength is absent or matches the supplied strength master list."""
     allowed = allowed_strengths_for_product(product_name)
-    if not allowed:
-        return True
-    if observed_strengths is None:
-        return True
-    if isinstance(observed_strengths, (int, float)):
-        observed = (_norm_strength_number(observed_strengths),)
-    else:
-        observed = _norm_strength_tuple(observed_strengths)
-    if not observed:
-        return True
-    if observed in allowed:
-        return True
+    if not allowed or observed_strengths is None: return True
+    observed = (_norm_strength_number(observed_strengths),) if isinstance(observed_strengths, (int, float)) else _norm_strength_tuple(observed_strengths)
+    if not observed: return True
+    if observed in allowed: return True
     if all(len(a) == 1 for a in allowed):
         allowed_single_values = {a[0] for a in allowed}
         return all(v in allowed_single_values for v in observed)
     return False
 
-
 def format_strength_tuple(strengths) -> str:
-    if strengths is None:
-        return ""
-    if isinstance(strengths, (int, float)):
-        strengths = (strengths,)
+    if strengths is None: return ""
+    if isinstance(strengths, (int, float)): strengths = (strengths,)
     out = []
     for v in strengths:
         fv = float(v)
         out.append(str(int(fv)) if fv.is_integer() else str(fv))
     return " / ".join(out) + " mg" if out else ""
 
-
 def strength_comment_for_product(product_name: str, observed_strengths) -> str:
-    """Return comment text when observed strength is outside the master strength list."""
     if observed_strengths and not is_strength_allowed_for_product(product_name, observed_strengths):
         allowed = allowed_strengths_for_product(product_name)
         allowed_text = ", ".join(sorted(format_strength_tuple(a) for a in allowed)) if allowed else "not configured"
-        return (
-            f"Product strength mismatch for {product_name}: extracted "
-            f"{format_strength_tuple(observed_strengths)}; allowed strength(s): {allowed_text}."
-        )
+        return f"Product strength mismatch for {product_name}: extracted {format_strength_tuple(observed_strengths)}; allowed strength(s): {allowed_text}."
     return ""
+
+def sanitize_filename_component(value: str, fallback: str = "Unknown") -> str:
+    value = clean_value(value)
+    value = str(value or "").strip() or fallback
+    value = re.sub(r'[<>:"/\\|?*]+', '_', value)
+    value = re.sub(r'\s+', '_', value)
+    value = re.sub(r'_+', '_', value).strip('._ ')
+    return value or fallback
+
+def build_suggested_xml_filename(safety_id: str, validity_value: str, is_serious: bool, molecule_names: List[str], fallback_stem: str = "XML") -> str:
+    """Valid cases: SafetyID_S/NS_Molecule.xml; Non-Valid cases: SafetyID_NV_Molecule.xml."""
+    safety_part = sanitize_filename_component(safety_id, fallback_stem)
+    clean_molecules = [sanitize_filename_component(m, "") for m in molecule_names if sanitize_filename_component(m, "")]
+    molecule_part = "+".join(clean_molecules) if clean_molecules else "UnknownMolecule"
+    if isinstance(validity_value, str) and validity_value.startswith("Non-Valid"):
+        return f"{safety_part}_NV_{molecule_part}.xml"
+    seriousness_part = "S" if is_serious else "NS"
+    return f"{safety_part}_{seriousness_part}_{molecule_part}.xml"
+
+def make_unique_filename(filename: str, used_names: Set[str]) -> str:
+    base = filename[:-4] if filename.lower().endswith('.xml') else filename
+    candidate, counter = f"{base}.xml", 2
+    while candidate.lower() in used_names:
+        candidate = f"{base}_{counter}.xml"
+        counter += 1
+    used_names.add(candidate.lower())
+    return candidate
 
 def get_launch_date(product_name: str, strength_mg) -> Optional[date]:
     key = normalize_text(product_name)
     info = LAUNCH_INFO.get(key)
     if not info:
         return None
-
     if not is_strength_allowed_for_product(product_name, strength_mg):
         return None
-
     status, payload = info
-
     if status == "launched":
         return payload
-
     if status == "launched_by_strength":
         if isinstance(payload, dict) and payload:
             if strength_mg is not None:
-                if isinstance(strength_mg, (tuple, list)):
-                    strength_key = strength_mg[0] if strength_mg else None
-                else:
-                    strength_key = strength_mg
+                strength_key = strength_mg[0] if isinstance(strength_mg, (tuple, list)) and strength_mg else strength_mg
                 if strength_key is not None:
                     try:
                         return payload.get(strength_key) if strength_key in payload else payload.get(float(strength_key))
@@ -420,7 +375,6 @@ def get_launch_date(product_name: str, strength_mg) -> Optional[date]:
                         return None
             dates = [d for d in payload.values() if d is not None]
             return min(dates) if dates else None
-
     return None
 
 def get_launch_status(product_name: str) -> Optional[str]:
@@ -437,6 +391,7 @@ if "uploader_version" not in st.session_state:
     st.session_state["uploader_version"] = 0
 
 all_rows_display: List[Dict] = []
+renamed_xml_meta: Dict[int, Dict] = {}
 current_date = datetime.now().strftime("%d-%b-%Y")
 
 with tab1:
@@ -505,8 +460,9 @@ with tab1:
             warnings: List[str] = []
             comments: List[str] = []
             try:
-                tree = ET.parse(uploaded_file)
-                root = tree.getroot()
+                xml_bytes = uploaded_file.getvalue()
+                root = ET.fromstring(xml_bytes)
+                original_file_stem = Path(getattr(uploaded_file, 'name', f'XML_{idx}')).stem
             except Exception as e:
                 st.error(f"Failed to parse XML file {getattr(uploaded_file, 'name', '(unnamed)')}: {e}")
                 progress.progress(idx / total_files)
@@ -745,25 +701,14 @@ with tab1:
 
                         ingredient_strengths = extract_ingredient_strengths_mg(drug, ns)
                         product_name_strengths = extract_strengths_mg(display_name_for_detail)
-
-                        # Strength source rule:
-                        # 1) XML ingredient numerator strength is the primary source.
-                        # 2) Product-name strength is used only if XML ingredient strength is absent.
-                        # 3) Dosage, dose quantity, and formulation text are intentionally ignored.
                         observed_strengths = ingredient_strengths or product_name_strengths
 
                         if ingredient_strengths:
-                            parts.append(f"Ingredient Strength: {format_strength_tuple(ingredient_strengths)}")
+                            parts.append(f"XML Ingredient Strength: {format_strength_tuple(ingredient_strengths)}")
                         if product_name_strengths:
                             parts.append(f"Product Name Strength: {format_strength_tuple(product_name_strengths)}")
-
                         if ingredient_strengths and product_name_strengths and ingredient_strengths != product_name_strengths:
-                            comments.append(
-                                f"Product strength mismatch between XML ingredient field and product name for {display_name_for_detail}: "
-                                f"ingredient strength {format_strength_tuple(ingredient_strengths)} vs "
-                                f"product name strength {format_strength_tuple(product_name_strengths)}."
-                            )
-
+                            comments.append(f"Product strength mismatch between XML ingredient field and product name for {display_name_for_detail}: XML ingredient strength {format_strength_tuple(ingredient_strengths)} vs product name strength {format_strength_tuple(product_name_strengths)}.")
                         strength_comment = strength_comment_for_product(matched_company_prod, observed_strengths)
                         if strength_comment:
                             comments.append(strength_comment)
@@ -1084,6 +1029,22 @@ with tab1:
                         prod_lines.append(f"{pretty} - " + "; ".join(statuses))
                     event_wise_listedness_display = "\n".join(prod_lines)
 
+            molecule_names_for_filename = [pnorm.title() for pnorm in sorted(list(case_products_norm))]
+            suggested_xml_filename = build_suggested_xml_filename(
+                sender_id,
+                validity_value,
+                case_has_serious_event,
+                molecule_names_for_filename,
+                fallback_stem=original_file_stem
+            )
+            renamed_xml_meta[idx] = {
+                "xml_bytes": xml_bytes,
+                "safety_id": sender_id,
+                "is_serious": case_has_serious_event,
+                "molecule_names": molecule_names_for_filename,
+                "fallback_stem": original_file_stem,
+            }
+
             all_rows_display.append({
                 'SL No': idx,
                 'Date': current_date,
@@ -1099,6 +1060,7 @@ with tab1:
                 'Validity': validity_value,
                 'Comment': "; ".join(sorted(set(comments))) if comments else "",
                 'Reportability': reportability,
+                'Suggested XML File Name': suggested_xml_filename,
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
             })
 
@@ -1120,21 +1082,64 @@ with tab2:
         preferred_order = [
             'SL No','Date','Sender ID','Report Date','Case Age (days)','Reporter Qualification',
             'Patient Detail','Product Detail','Event Details','Listedness','Narrative',
-            'Validity','Comment','Reportability','Parsing Warnings'
+            'Validity','Comment','Reportability','Suggested XML File Name','Parsing Warnings'
         ]
         df_display = df_display[[c for c in preferred_order if c in df_display.columns]]
 
+        editable_columns = [c for c in df_display.columns if c != 'Validity']
         edited_df = st.data_editor(
             df_display,
             num_rows="dynamic",
             use_container_width=True,
-            disabled=df_display.columns
+            disabled=editable_columns,
+            key="parsed_table_editor"
         )
+
+        # Recompute suggested XML file name after manual edits to Validity.
+        if 'Suggested XML File Name' in edited_df.columns:
+            used_edited_names: Set[str] = set()
+            recomputed_names = []
+            for _, row in edited_df.iterrows():
+                sl_no = row.get('SL No')
+                meta = renamed_xml_meta.get(sl_no)
+                if meta:
+                    new_name = build_suggested_xml_filename(
+                        meta['safety_id'],
+                        row.get('Validity', ''),
+                        meta['is_serious'],
+                        meta['molecule_names'],
+                        fallback_stem=meta['fallback_stem']
+                    )
+                    new_name = make_unique_filename(new_name, used_edited_names)
+                else:
+                    new_name = row.get('Suggested XML File Name', '')
+                recomputed_names.append(new_name)
+            edited_df['Suggested XML File Name'] = recomputed_names
 
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
             edited_df.to_excel(writer, index=False, sheet_name="Parsed Data")
-        st.download_button("\u2B07\uFE0F Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+        st.download_button("⬇️ Download Excel", excel_buffer.getvalue(), "parsed_data.xlsx")
+
+        if not edited_df.empty and renamed_xml_meta:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+                for _, row in edited_df.iterrows():
+                    sl_no = row.get('SL No')
+                    meta = renamed_xml_meta.get(sl_no)
+                    if not meta:
+                        continue
+                    file_name = row.get('Suggested XML File Name', '')
+                    if not file_name:
+                        file_name = build_suggested_xml_filename(
+                            meta['safety_id'],
+                            row.get('Validity', ''),
+                            meta['is_serious'],
+                            meta['molecule_names'],
+                            fallback_stem=meta['fallback_stem']
+                        )
+                    zip_file.writestr(file_name, meta['xml_bytes'])
+            st.download_button("⬇️ Download Renamed XML Files (.zip)", zip_buffer.getvalue(), "renamed_xml_files.zip", mime="application/zip")
     else:
         st.info("No data available yet. Please upload files in the first tab.")
 
