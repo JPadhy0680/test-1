@@ -179,7 +179,7 @@ def contains_competitor_name(lot_text: str, competitor_names: Set[str]) -> bool:
 
 company_products = [
     "abiraterone", "apixaban", "apremilast", "bexarotene", "brivaracetam", "clobazam", "clonazepam",
-    "cyanocobalamin", "dabigatran", "dapagliflozin", "dapagliflozine","dimethyl fumarate", "edoxaban", "empagliflozin", "famotidine",
+    "cyanocobalamin", "dabigatran", "dapagliflozin","dimethyl fumarate", "edoxaban", "empagliflozin", "famotidine",
     "fesoterodine", "icatibant", "itraconazole", "linagliptin", "linagliptin + metformin", "metformin", "nintedanib", "pirfenidone", "raltegravir", "ranolazine", "rivaroxaban", "safinamide", "saxagliptin",
     "sitagliptin", "sacubritril + valsartan", "sacubritril", "valsartan", "tamsulosin + solifenacin", "tapentadol", "ticagrelor", "tamsulosin",
     "solifenacin"
@@ -207,8 +207,10 @@ LAUNCH_INFO = {
     }),
     "cyanocobalamin": ("awaited", None),
     "dabigatran": ("yet", None),
-    "dapagliflozin": ("launched_by_strength", {10.0: parse_dd_mmm_yy("26-Aug-25"), 5.0: parse_dd_mmm_yy("10-Sep-25")}),
-    "dapagliflozine": ("launched_by_strength", {10.0: parse_dd_mmm_yy("26-Aug-25"), 5.0: parse_dd_mmm_yy("10-Sep-25")}),
+    "dapagliflozin": ("launched_by_strength", {
+        10.0: parse_dd_mmm_yy("26-Aug-25"), 
+        5.0: parse_dd_mmm_yy("10-Sep-25")
+    }),
     "dimethyl fumarate": ("launched", parse_dd_mmm_yy("05-Feb-24")),
     "edoxaban": ("awaited", None),
     "empagliflozin": ("awaited", None),
