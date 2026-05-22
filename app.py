@@ -368,13 +368,21 @@ def get_launch_date(product_name: str, strength_mg) -> Optional[date]:
         return payload
     if status == "launched_by_strength":
         if isinstance(payload, dict) and payload:
-            if strength_mg is not None:
-                strength_key = strength_mg[0] if isinstance(strength_mg, (tuple, list)) and strength_mg else strength_mg
-                if strength_key is not None:
-                    try:
-                        return payload.get(strength_key) if strength_key in payload else payload.get(float(strength_key))
-                    except Exception:
-                        return None
+            strength_key = None
+            if isinstance(strength_mg, (tuple, list)):
+                if len(strength_mg) > 0:
+                    strength_key = strength_mg[0]
+            elif strength_mg is not None:
+                strength_key = strength_mg
+
+            if strength_key is not None:
+                try:
+                    if strength_key in payload:
+                        return payload.get(strength_key)
+                    return payload.get(float(strength_key))
+                except Exception:
+                    pass
+
             dates = [d for d in payload.values() if d is not None]
             return min(dates) if dates else None
     return None
@@ -385,43 +393,6 @@ def get_launch_status(product_name: str) -> Optional[str]:
     if not info:
         return None
     return info[0]
-
-
-def detect_pre_launch_reasons(product_name: str,
-                              strength_mg,
-                              drug_start: Optional[date] = None,
-                              drug_stop: Optional[date] = None,
-                              event_dates: Optional[List[Tuple[str, Optional[date], Optional[date]]]] = None,
-                              frd_date: Optional[date] = None,
-                              lrd_date: Optional[date] = None) -> List[str]:
-    """Return the exposure components that fall before the applicable launch date."""
-    launch_dt = get_launch_date(product_name, strength_mg)
-    if launch_dt is None:
-        return []
-
-    reasons: List[str] = []
-    if frd_date and frd_date < launch_dt:
-        reasons.append("FRD")
-    if lrd_date and lrd_date < launch_dt:
-        reasons.append("LRD")
-    if drug_start and drug_start < launch_dt:
-        reasons.append("Drug")
-    if drug_stop and drug_stop < launch_dt:
-        reasons.append("Drug stop")
-
-    if event_dates:
-        for _, evt_start, evt_stop in event_dates:
-            if (evt_start and evt_start < launch_dt) or (evt_stop and evt_stop < launch_dt):
-                reasons.append("Event")
-                break
-
-    seen = set()
-    deduped: List[str] = []
-    for reason in reasons:
-        if reason not in seen:
-            seen.add(reason)
-            deduped.append(reason)
-    return deduped
 
 # -------------------------------- UI: Upload & Parse --------------------------
 
@@ -739,7 +710,7 @@ with tab1:
                             parts.append(f"Formulation: {form_clean}")
 
                         ingredient_strengths = extract_ingredient_strengths_mg(drug, ns)
-                        product_name_strengths = extract_strengths_mg(display_name_for_detail, text_clean, dose_val, dose_unit)
+                        product_name_strengths = extract_strengths_mg(display_name_for_detail)
                         observed_strengths = ingredient_strengths or product_name_strengths
 
                         if ingredient_strengths:
@@ -788,17 +759,17 @@ with tab1:
                             if status in ("yet", "awaited"):
                                 non_valid_reason = "Product not Launched"
                             else:
-                                drug_exposure_reasons = detect_pre_launch_reasons(
-                                    matched_company_prod,
-                                    observed_strengths,
-                                    drug_start=start_date_obj,
-                                    drug_stop=stop_date_obj,
-                                )
-                                if drug_exposure_reasons:
-                                    non_valid_reason = f"Drug exposure prior to Launch; {', '.join(drug_exposure_reasons)}"
+                                launch_dt = get_launch_date(matched_company_prod, observed_strengths)
+                                exposure_reasons = []
+                                # We'll use FRD/LRD computed later
+                                drug_prior = (start_date_obj and start_date_obj < (launch_dt or start_date_obj)) if launch_dt else False
+                                if launch_dt and drug_prior:
+                                    exposure_reasons.append("Drug")
+                                if exposure_reasons:
+                                    non_valid_reason = f"Drug exposure prior to Launch; {', '.join(sorted(set(exposure_reasons)))}"
                         displayed_drugs_assessment.append((display_name_for_detail or "Unknown product", non_valid_reason))
 
-                        case_drug_dates_display.append((matched_company_prod, observed_strengths, start_date_obj, None))
+                        case_drug_dates_display.append((matched_company_prod, observed_strengths, start_date_obj, stop_date_obj))
 
             seriousness_criteria = list(seriousness_map.keys())
             event_details_list: List[str] = []
@@ -987,28 +958,37 @@ with tab1:
                             "Case validity is based on the presence of at least one valid suspect drug."
                         )
 
+            earliest_launch_dt = None
+            for prod, strength_mg, sdt, edt in case_drug_dates_display:
+                if prod:
+                    ld = get_launch_date(prod, strength_mg)
+                    if ld:
+                        earliest_launch_dt = ld if (earliest_launch_dt is None or ld < earliest_launch_dt) else earliest_launch_dt
+
             frd_raw_obj = parse_date_obj(global_dates["FRD_raw"]) if global_dates["FRD_raw"] else None
             lrd_raw_obj = parse_date_obj(global_dates["LRD_raw"]) if global_dates["LRD_raw"] else None
             exposure_reasons = []
-            if validity_reason is None and case_drug_dates_display:
-                for prod, strength_mg, drug_start, drug_stop in case_drug_dates_display:
-                    if not prod:
-                        continue
-                    exposure_reasons.extend(
-                        detect_pre_launch_reasons(
-                            prod,
-                            strength_mg,
-                            drug_start=drug_start,
-                            drug_stop=drug_stop,
-                            event_dates=case_event_dates,
-                            frd_date=frd_raw_obj,
-                            lrd_date=lrd_raw_obj,
-                        )
-                    )
+            if validity_reason is None and earliest_launch_dt is not None:
+                if frd_raw_obj and frd_raw_obj < earliest_launch_dt:
+                    exposure_reasons.append("FRD")
+                if lrd_raw_obj and lrd_raw_obj < earliest_launch_dt:
+                    exposure_reasons.append("LRD")
+                event_prior = any(
+                    (evt_start and evt_start < earliest_launch_dt) or
+                    (evt_stop and evt_stop < earliest_launch_dt)
+                    for _, evt_start, evt_stop in case_event_dates
+                )
+                if event_prior:
+                    exposure_reasons.append("Event")
+                drug_prior = any(
+                    (drug_start and drug_start < earliest_launch_dt)
+                    for prod, _, drug_start, _ in case_drug_dates_display
+                    if prod
+                )
+                if drug_prior:
+                    exposure_reasons.append("Drug")
                 if exposure_reasons:
-                    seen = set()
-                    exposure_reasons = [x for x in exposure_reasons if not (x in seen or seen.add(x))]
-                    validity_reason = f"Drug exposure prior to Launch; {', '.join(exposure_reasons)}"
+                    validity_reason = f"Drug exposure prior to Launch; {', '.join(sorted(set(exposure_reasons)))}"
 
             validity_value = f"Non-Valid ({validity_reason})" if validity_reason else "Valid"
 
