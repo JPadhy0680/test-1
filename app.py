@@ -236,7 +236,7 @@ LAUNCH_INFO = {
     "safinamide": ("launched", parse_dd_mmm_yy("28-Apr-26")), 
     "saxagliptin": ("launched_by_strength", {
         5.0: parse_dd_mmm_yy("17-Apr-26"),
-        2.5: None 
+        2.5: parse_dd_mmm_yy("20-May-26") 
     }),
     "sitagliptin": ("launched", parse_dd_mmm_yy("12-Mar-26")),
     "sacubritril + valsartan": ("awaited", None),
