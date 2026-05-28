@@ -994,31 +994,26 @@ with tab1:
             narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
             narrative_full = clean_value(narrative_full_raw)
 
-            # Additive rule requested by user:
-            # if suspect drug is Nintedanib and narrative mentions OFEV,
-            # consider that Nintedanib product non-valid as Non-company product OFEV.
+            # OFEV check applies only for Nintedanib suspect product(s).
             has_ofev_in_narrative = bool(re.search(r'\bofev\b', normalize_text(narrative_full)))
             has_nintedanib_suspect = ('nintedanib' in case_products_norm)
-            ofev_nintedanib_rule_triggered = False
             if has_ofev_in_narrative and has_nintedanib_suspect:
                 adjusted_assessments: List[Tuple[str, str]] = []
                 nintedanib_rows_found = False
                 for nm, rsn in displayed_drugs_assessment:
                     if re.search(r'\bnintedanib\b', normalize_text(nm)):
                         nintedanib_rows_found = True
-                        ofev_nintedanib_rule_triggered = True
                         rsn = "Non-company product OFEV"
                     adjusted_assessments.append((nm, rsn))
                 displayed_drugs_assessment = adjusted_assessments
 
-                # Preserve the existing mixed-drug behaviour:
-                # mark the whole case non-valid only when no suspect drug remains valid.
+                # Preserve existing case logic: make case non-valid only when
+                # no suspect drug remains valid.
                 if validity_reason != "No patient details" and nintedanib_rows_found:
                     if len(displayed_drugs_assessment) == 1 or all(rsn for _, rsn in displayed_drugs_assessment):
                         validity_reason = "Non-company product OFEV"
 
-            # If the above OFEV/Nintedanib instance is present and XML carries
-            # nullification/amendment information, notify through Comment.
+            # Nullification/amendment check applies to every case.
             has_nullification_or_amendment = False
             nullification_reason_elem = root.find(
                 './/hl7:code[@displayName="nullificationAmendmentReason"]/../hl7:value/hl7:originalText',
@@ -1040,7 +1035,7 @@ with tab1:
                     if code_val:
                         has_nullification_or_amendment = True
 
-            if ofev_nintedanib_rule_triggered and has_nullification_or_amendment:
+            if has_nullification_or_amendment:
                 comments.append("check nullification or amendment comment")
 
             validity_value = f"Non-Valid ({validity_reason})" if validity_reason else "Valid"
