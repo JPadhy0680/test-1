@@ -990,11 +990,32 @@ with tab1:
                 if exposure_reasons:
                     validity_reason = f"Drug exposure prior to Launch; {', '.join(sorted(set(exposure_reasons)))}"
 
-            validity_value = f"Non-Valid ({validity_reason})" if validity_reason else "Valid"
-
             narrative_elem = root.find('.//hl7:code[@code="PAT_ADV_EVNT"]/../hl7:text', ns)
             narrative_full_raw = narrative_elem.text if narrative_elem is not None else ''
             narrative_full = clean_value(narrative_full_raw)
+
+            # Additive rule requested by user:
+            # if suspect drug is Nintedanib and narrative mentions OFEV,
+            # consider that Nintedanib product non-valid as Non-company product OFEV.
+            has_ofev_in_narrative = bool(re.search(r'\bofev\b', normalize_text(narrative_full)))
+            has_nintedanib_suspect = ('nintedanib' in case_products_norm)
+            if has_ofev_in_narrative and has_nintedanib_suspect:
+                adjusted_assessments: List[Tuple[str, str]] = []
+                nintedanib_rows_found = False
+                for nm, rsn in displayed_drugs_assessment:
+                    if re.search(r'\bnintedanib\b', normalize_text(nm)):
+                        nintedanib_rows_found = True
+                        rsn = "Non-company product OFEV"
+                    adjusted_assessments.append((nm, rsn))
+                displayed_drugs_assessment = adjusted_assessments
+
+                # Preserve the existing mixed-drug behaviour:
+                # mark the whole case non-valid only when no suspect drug remains valid.
+                if validity_reason != "No patient details" and nintedanib_rows_found:
+                    if len(displayed_drugs_assessment) == 1 or all(rsn for _, rsn in displayed_drugs_assessment):
+                        validity_reason = "Non-company product OFEV"
+
+            validity_value = f"Non-Valid ({validity_reason})" if validity_reason else "Valid"
 
             if comments and validity_reason is None:
                 validity_value = "Kindly check comment and assess validity manually"
