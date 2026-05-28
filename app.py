@@ -999,12 +999,14 @@ with tab1:
             # consider that Nintedanib product non-valid as Non-company product OFEV.
             has_ofev_in_narrative = bool(re.search(r'\bofev\b', normalize_text(narrative_full)))
             has_nintedanib_suspect = ('nintedanib' in case_products_norm)
+            ofev_nintedanib_rule_triggered = False
             if has_ofev_in_narrative and has_nintedanib_suspect:
                 adjusted_assessments: List[Tuple[str, str]] = []
                 nintedanib_rows_found = False
                 for nm, rsn in displayed_drugs_assessment:
                     if re.search(r'\bnintedanib\b', normalize_text(nm)):
                         nintedanib_rows_found = True
+                        ofev_nintedanib_rule_triggered = True
                         rsn = "Non-company product OFEV"
                     adjusted_assessments.append((nm, rsn))
                 displayed_drugs_assessment = adjusted_assessments
@@ -1014,6 +1016,32 @@ with tab1:
                 if validity_reason != "No patient details" and nintedanib_rows_found:
                     if len(displayed_drugs_assessment) == 1 or all(rsn for _, rsn in displayed_drugs_assessment):
                         validity_reason = "Non-company product OFEV"
+
+            # If the above OFEV/Nintedanib instance is present and XML carries
+            # nullification/amendment information, notify through Comment.
+            has_nullification_or_amendment = False
+            nullification_reason_elem = root.find(
+                './/hl7:code[@displayName="nullificationAmendmentReason"]/../hl7:value/hl7:originalText',
+                ns
+            )
+            if (
+                nullification_reason_elem is not None
+                and nullification_reason_elem.text
+                and nullification_reason_elem.text.strip()
+            ):
+                has_nullification_or_amendment = True
+            else:
+                nullification_code_elem = root.find(
+                    './/hl7:code[@displayName="nullificationAmendmentCode"]/../hl7:value',
+                    ns
+                )
+                if nullification_code_elem is not None:
+                    code_val = clean_value(nullification_code_elem.attrib.get('code', ''))
+                    if code_val:
+                        has_nullification_or_amendment = True
+
+            if ofev_nintedanib_rule_triggered and has_nullification_or_amendment:
+                comments.append("check nullification or amendment comment")
 
             validity_value = f"Non-Valid ({validity_reason})" if validity_reason else "Valid"
 
