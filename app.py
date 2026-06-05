@@ -160,6 +160,12 @@ def build_tracker_comment(validity_value: str, comment_value: str) -> str:
             seen.add(key)
     return "; ".join(deduped)
 
+def simplify_tracker_validity(validity_value: str) -> str:
+    validity_text = clean_value(validity_value)
+    if validity_text.startswith("Non-Valid"):
+        return "Non-Valid"
+    return validity_text
+
 def normalize_text(s: str) -> str:
     s = (s or "").lower()
     s = re.sub(r'[^a-z0-9\s\+\-]', ' ', s)
@@ -1293,7 +1299,7 @@ with tab3:
             'Referance ID': tracker_source_df['Referance ID'].fillna(''),
             'IRD': tracker_source_df['IRD'].fillna(''),
             'Suspect Product': tracker_source_df['Suspect Product'].fillna(''),
-            'Validity': tracker_source_df['Validity'].fillna(''),
+            'Validity': tracker_source_df['Validity'].apply(simplify_tracker_validity).fillna(''),
             'Seriousness': tracker_source_df['Seriousness'].fillna(''),
             'Safety Report ID': tracker_source_df['Safety Report ID'].fillna('WIP'),
             'Comment': tracker_source_df['Tracker Comment'].fillna(''),
@@ -1306,7 +1312,6 @@ with tab3:
             '\t'.join(value.replace('\n', ' ').strip() for value in row)
             for row in clipboard_ready_df.itertuples(index=False, name=None)
         )
-
 
         st.caption('Copy output below is headerless and tab-separated, ready to paste into the tracker.')
         st.text_area('Preview (without header)', copy_text, height=220, key='tracker_copy_preview')
