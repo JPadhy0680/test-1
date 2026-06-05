@@ -7,6 +7,7 @@ import io
 import zipfile
 import re
 import calendar
+import html
 from pathlib import Path
 from typing import Optional, Set, Tuple, List, Dict
 
@@ -122,6 +123,42 @@ def is_unknown(value: str) -> bool:
 
 def clean_value(value: str) -> str:
     return "" if is_unknown(value) else str(value)
+
+def extract_td_value(report_date_display: str) -> str:
+    if not report_date_display:
+        return ""
+    for line in str(report_date_display).splitlines():
+        if line.strip().upper().startswith("TD:"):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+def build_tracker_comment(validity_value: str, comment_value: str) -> str:
+    parts: List[str] = []
+    validity_text = clean_value(validity_value)
+    comment_text = clean_value(comment_value)
+
+    m = re.match(r"Non-Valid\s*\((.*?)\)", validity_text, flags=re.IGNORECASE | re.DOTALL)
+    if m:
+        reason = " ".join(m.group(1).split())
+        if reason:
+            parts.append(reason)
+        remainder = validity_text[m.end():].strip()
+        if remainder:
+            parts.append(" ".join(remainder.split()))
+    elif validity_text and validity_text != "Valid":
+        parts.append(" ".join(validity_text.split()))
+
+    if comment_text:
+        parts.append(" ".join(comment_text.split()))
+
+    deduped: List[str] = []
+    seen: Set[str] = set()
+    for item in parts:
+        key = item.lower()
+        if item and key not in seen:
+            deduped.append(item)
+            seen.add(key)
+    return "; ".join(deduped)
 
 def normalize_text(s: str) -> str:
     s = (s or "").lower()
@@ -396,7 +433,8 @@ def get_launch_status(product_name: str) -> Optional[str]:
 
 # -------------------------------- UI: Upload & Parse --------------------------
 
-tab1, tab2 = st.tabs(["Upload & Parse", "Export & Edit"])
+tab1, tab2, tab3 = st.tabs(["Upload & Parse", "Export & Edit", "Tracker Copy"])
+edited_df = None
 if "uploader_version" not in st.session_state:
     st.session_state["uploader_version"] = 0
 
@@ -605,6 +643,7 @@ with tab1:
             case_displayed_mahs: List[str] = []
             case_products_norm: Set[str] = set()
             product_norm_to_pretty: Dict[str, str] = {}
+            suspect_product_names_all: List[str] = []
 
             displayed_drugs_assessment: List[Tuple[str, str]] = []
 
@@ -627,6 +666,11 @@ with tab1:
                         alt_name = drug.find('.//hl7:manufacturedProduct/hl7:name', ns)
                         if alt_name is not None and alt_name.text and alt_name.text.strip():
                             raw_drug_text = alt_name.text.strip()
+
+                    if raw_drug_text:
+                        cleaned_suspect_name = clean_value(raw_drug_text)
+                        if cleaned_suspect_name:
+                            suspect_product_names_all.append(cleaned_suspect_name)
 
                     def contains_company_product(text: str, company_products: list) -> str:
                         norm = normalize_text(text)
@@ -1084,6 +1128,14 @@ with tab1:
                     event_wise_listedness_display = "\n".join(prod_lines)
 
             molecule_names_for_filename = [pnorm.title() for pnorm in sorted(list(case_products_norm))]
+            suspect_products_preferred = [
+                product_norm_to_pretty.get(pnorm, pnorm.title())
+                for pnorm in sorted(list(case_products_norm), key=lambda k: product_norm_to_pretty.get(k, k))
+            ]
+            suspect_product_display = "; ".join(suspect_products_preferred) if suspect_products_preferred else "; ".join(dict.fromkeys(suspect_product_names_all))
+            seriousness_value = "Serious" if case_has_serious_event else "Non-serious"
+            comment_value = "; ".join(sorted(set(comments))) if comments else ""
+            tracker_comment_value = build_tracker_comment(validity_value, comment_value)
             suggested_xml_filename = build_suggested_xml_filename(
                 sender_id,
                 validity_value,
@@ -1112,8 +1164,15 @@ with tab1:
                 'Listedness': ('' if is_non_valid_case else event_wise_listedness_display),
                 'Narrative': narrative_full,
                 'Validity': validity_value,
-                'Comment': "; ".join(sorted(set(comments))) if comments else "",
+                'Comment': comment_value,
                 'Reportability': reportability,
+                'Receipt Date': current_date,
+                'Referance ID': sender_id,
+                'IRD': td_disp,
+                'Suspect Product': suspect_product_display,
+                'Seriousness': seriousness_value,
+                'Safety Report ID': 'WIP',
+                'Tracker Comment': tracker_comment_value,
                 'Suggested XML File Name': suggested_xml_filename,
                 'Parsing Warnings': "; ".join(warnings) if warnings else ""
             })
@@ -1194,6 +1253,70 @@ with tab2:
                         )
                     zip_file.writestr(file_name, meta['xml_bytes'])
             st.download_button("⬇️ Download Renamed XML Files (.zip)", zip_buffer.getvalue(), "renamed_xml_files.zip", mime="application/zip")
+    else:
+        st.info("No data available yet. Please upload files in the first tab.")
+
+with tab3:
+    st.markdown("### 📋 Tracker Copy Format")
+    if all_rows_display:
+        tracker_source_df = pd.DataFrame(all_rows_display)
+
+        if edited_df is not None and not edited_df.empty and 'SL No' in edited_df.columns and 'SL No' in tracker_source_df.columns:
+            tracker_source_df = tracker_source_df.set_index('SL No')
+            edited_updates = edited_df.set_index('SL No')
+            for col in ['Validity', 'Suggested XML File Name']:
+                if col in tracker_source_df.columns and col in edited_updates.columns:
+                    tracker_source_df[col] = edited_updates[col]
+            tracker_source_df = tracker_source_df.reset_index()
+
+        if 'IRD' not in tracker_source_df.columns and 'Report Date' in tracker_source_df.columns:
+            tracker_source_df['IRD'] = tracker_source_df['Report Date'].apply(extract_td_value)
+        if 'Referance ID' not in tracker_source_df.columns and 'Sender ID' in tracker_source_df.columns:
+            tracker_source_df['Referance ID'] = tracker_source_df['Sender ID']
+        if 'Receipt Date' not in tracker_source_df.columns and 'Date' in tracker_source_df.columns:
+            tracker_source_df['Receipt Date'] = tracker_source_df['Date']
+        if 'Tracker Comment' not in tracker_source_df.columns:
+            tracker_source_df['Tracker Comment'] = tracker_source_df.apply(
+                lambda row: build_tracker_comment(row.get('Validity', ''), row.get('Comment', '')),
+                axis=1
+            )
+        if 'Safety Report ID' not in tracker_source_df.columns:
+            tracker_source_df['Safety Report ID'] = 'WIP'
+        if 'Seriousness' not in tracker_source_df.columns:
+            tracker_source_df['Seriousness'] = ''
+        if 'Suspect Product' not in tracker_source_df.columns:
+            tracker_source_df['Suspect Product'] = ''
+
+        tracker_df = pd.DataFrame({
+            'Receipt Date': tracker_source_df['Receipt Date'].fillna(''),
+            'Source': 'MHRA',
+            'Referance ID': tracker_source_df['Referance ID'].fillna(''),
+            'IRD': tracker_source_df['IRD'].fillna(''),
+            'Suspect Product': tracker_source_df['Suspect Product'].fillna(''),
+            'Validity': tracker_source_df['Validity'].fillna(''),
+            'Seriousness': tracker_source_df['Seriousness'].fillna(''),
+            'Safety Report ID': tracker_source_df['Safety Report ID'].fillna('WIP'),
+            'Comment': tracker_source_df['Tracker Comment'].fillna(''),
+        })
+
+        st.dataframe(tracker_df, use_container_width=True, hide_index=True)
+
+        clipboard_ready_df = tracker_df.astype(str).replace({'nan': '', 'None': ''}, regex=False)
+        copy_text = '\n'.join(
+            '\t'.join(value.replace('\n', ' ').strip() for value in row)
+            for row in clipboard_ready_df.itertuples(index=False, name=None)
+        )
+
+
+        st.caption('Copy output below is headerless and tab-separated, ready to paste into the tracker.')
+        st.text_area('Preview (without header)', copy_text, height=220, key='tracker_copy_preview')
+
+        copy_html = f"""
+        <textarea id="tracker-copy-source" style="position:absolute; left:-9999px; top:-9999px;">{html.escape(copy_text)}</textarea>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('tracker-copy-source').value).then(function(){{document.getElementById('tracker-copy-status').innerText='Copied to clipboard!';}}).catch(function(){{document.getElementById('tracker-copy-status').innerText='Copy failed. Please copy from the preview box.';}});" style="padding:0.5rem 0.9rem; border:1px solid #d0d0d0; border-radius:0.4rem; background:#f4f4f4; cursor:pointer;">Copy without header</button>
+        <div id="tracker-copy-status" style="margin-top:0.5rem; font-family:sans-serif; color:#333;"></div>
+        """
+        st.components.v1.html(copy_html, height=90)
     else:
         st.info("No data available yet. Please upload files in the first tab.")
 
