@@ -1337,7 +1337,10 @@ with tab3:
             'IRD': tracker_source_df['IRD'].fillna(''),
             'Suspect Product': tracker_source_df['Suspect Product'].apply(simplify_tracker_product).fillna(''),
             'Validity': tracker_source_df['Validity'].apply(simplify_tracker_validity).fillna(''),
-            'Seriousness': tracker_source_df['Seriousness'].fillna(''),
+            'Seriousness': tracker_source_df['Validity'].apply(lambda x: 'NA' if clean_value(x).startswith('Non-Valid') else '').where(
+                tracker_source_df['Validity'].apply(lambda x: clean_value(x).startswith('Non-Valid')),
+                tracker_source_df['Seriousness'].fillna('')
+            ),
             'Safety Report ID': tracker_source_df['Validity'].apply(lambda x: 'NA' if clean_value(x).startswith('Non-Valid') else 'WIP'),
             'Comment': tracker_source_df['Tracker Comment'].fillna(''),
         })
