@@ -302,6 +302,7 @@ LAUNCH_INFO = {
     "linagliptin": ("yet", None),
     "linagliptin + metformin": ("yet", None),
     "metformin": ("yet", None),
+    "letrozole": ("awaited", None),
     "nintedanib": ("launched", parse_dd_mmm_yy("28-Apr-26")),
     "pirfenidone": ("launched_by_strength", {
         267.0: parse_dd_mmm_yy("29-Jun-22"),
