@@ -262,14 +262,13 @@ def contains_competitor_name(lot_text: str, competitor_names: Set[str]) -> bool:
 company_products = [
     "abiraterone", "apixaban", "apremilast", "bexarotene", "brivaracetam", "clobazam", "clonazepam",
     "cyanocobalamin", "dabigatran", "dapagliflozin","dimethyl fumarate", "edoxaban", "empagliflozin", "famotidine",
-    "fesoterodine", "icatibant", "itraconazole", "linagliptin", "linagliptin + metformin", "metformin", "nintedanib", "pirfenidone", "raltegravir", "ranolazine", "rivaroxaban", "safinamide", "saxagliptin",
+    "fesoterodine", "icatibant", "itraconazole", "linagliptin", "linagliptin + metformin", "metformin", "letrozole", "nintedanib", "pirfenidone", "raltegravir", "ranolazine", "rivaroxaban", "safinamide", "saxagliptin",
     "sitagliptin", "sacubritril + valsartan", "sacubritril", "valsartan", "tamsulosin + solifenacin", "tapentadol", "ticagrelor", "tamsulosin",
     "solifenacin"
 ]
 
 category2_products = {
-    "clobazam", "clonazepam", "cyanocobalamin", "famotidine", "itraconazole",
-    "tamsulosin", "solifenacin", "tapentadol"
+    "clobazam", "clonazepam", "cyanocobalamin", "famotidine", "itraconazole","letrozole", "tamsulosin", "solifenacin", "tapentadol"
 }
 
 def parse_dd_mmm_yy(s):
