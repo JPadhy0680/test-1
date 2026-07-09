@@ -287,7 +287,11 @@ LAUNCH_INFO = {
         20.0: None 
     }),
     "cyanocobalamin": ("awaited", None),
-    "dabigatran": ("yet", None),
+    "dabigatran": ("launched_by_strength", {
+        75.0: parse_dd_mmm_yy("02-Jul-26"), 
+        110.0: parse_dd_mmm_yy("02-Jul-26"),
+        150.0: parse_dd_mmm_yy("02-Jul-26")
+    }),
     "dapagliflozin": ("launched_by_strength", {
         10.0: parse_dd_mmm_yy("26-Aug-25"), 
         5.0: parse_dd_mmm_yy("10-Sep-25")
