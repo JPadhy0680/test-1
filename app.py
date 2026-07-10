@@ -30,9 +30,9 @@ st.title("\U0001F4CA\U0001F9E0 E2B_R3 XML Triage Application \U0001F6E0\ufe0f \U
 with st.expander("\U0001F4D6 Instructions"):
     st.markdown("""
 - Upload **multiple E2B XML files**.
-- (Optional) Upload **LLT–PT mapping Excel** to enrich event names.
-- (Optional) Upload **Listedness Excel** with two columns: **Drug Name**, **LLT**.
-  We will compute **Listedness per event** and show it in a separate **Listedness** column.
+- The app automatically loads the permanent **MedDRA** Excel from the GitHub `data/` folder to enrich event names.
+- The app automatically loads the permanent **Listedness_CX** Excel from the GitHub `data/` folder with two columns: **Drug Name**, **LLT**.
+  We compute **Listedness per event** and show it in a separate **Listedness** column.
 - If the case has **2 or more Celix suspect products**, the **Listedness** column shows one line per product:
   `Drug X - Event 1: Listed; Event 2: Unlisted; ...`
 - Parsed data appears in the **Export & Edit** tab. **Validity** is editable; other columns are read-only.
@@ -594,6 +594,99 @@ all_rows_display: List[Dict] = []
 renamed_xml_meta: Dict[int, Dict] = {}
 current_date = datetime.now().strftime("%d-%b-%Y")
 
+# ---------------- Permanent Excel master files ----------------
+# Keep these files in the GitHub repository under the data folder:
+# data/MedDRA.xlsx
+# data/Listedness_CX.xlsx
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+MEDDRA_MASTER_BASENAME = "MedDRA"
+LISTEDNESS_MASTER_BASENAME = "Listedness_CX"
+
+def find_master_excel_file(base_name: str) -> Optional[Path]:
+    """Find a permanent Excel master file in the app data folder.
+
+    Preferred names are base_name.xlsx, base_name.xlsm, or base_name.xls.
+    Matching is case-insensitive as a fallback.
+    """
+    allowed_suffixes = (".xlsx", ".xlsm", ".xls")
+    if not DATA_DIR.exists():
+        return None
+
+    for suffix in allowed_suffixes:
+        candidate = DATA_DIR / f"{base_name}{suffix}"
+        if candidate.exists():
+            return candidate
+
+    wanted = {f"{base_name}{suffix}".lower() for suffix in allowed_suffixes}
+    for candidate in DATA_DIR.iterdir():
+        if candidate.is_file() and candidate.name.lower() in wanted:
+            return candidate
+    return None
+
+def excel_cache_key(file_path: Path) -> Tuple[str, int, int]:
+    """Create a cache key that changes whenever the Excel file changes.
+
+    Streamlit cache normally reuses data if function arguments are unchanged.
+    Including modified time and size means a GitHub/deployment update to the same
+    filename is loaded automatically after redeploy/reboot.
+    """
+    stat = file_path.stat()
+    return (str(file_path.resolve()), int(stat.st_mtime_ns), int(stat.st_size))
+
+@st.cache_data(show_spinner=False)
+def load_excel_master(file_path_text: str, modified_time_ns: int, file_size: int) -> pd.DataFrame:
+    """Load an Excel master file from repository storage.
+
+    modified_time_ns and file_size are intentionally included in the function
+    signature so Streamlit refreshes the cached data whenever the file changes.
+    """
+    file_path = Path(file_path_text)
+    suffix = file_path.suffix.lower()
+    engine = "openpyxl" if suffix in {".xlsx", ".xlsm"} else None
+    return pd.read_excel(file_path, engine=engine)
+
+def read_master_excel(file_path: Path) -> pd.DataFrame:
+    file_path_text, modified_time_ns, file_size = excel_cache_key(file_path)
+    return load_excel_master(file_path_text, modified_time_ns, file_size)
+
+def load_permanent_meddra_mapping() -> Optional[pd.DataFrame]:
+    file_path = find_master_excel_file(MEDDRA_MASTER_BASENAME)
+    if not file_path:
+        st.warning("Permanent MedDRA Excel not found. Add data/MedDRA.xlsx to GitHub.")
+        return None
+    try:
+        df = read_master_excel(file_path)
+        if "LLT Code" in df.columns:
+            df["LLT Code"] = df["LLT Code"].astype(str).str.strip()
+        st.caption(
+            f"Using permanent MedDRA master: {file_path.name} "
+            f"(updated {datetime.fromtimestamp(file_path.stat().st_mtime).strftime('%d-%b-%Y %H:%M')})"
+        )
+        return df
+    except Exception as e:
+        st.error(f"Failed to read permanent MedDRA Excel ({file_path.name}): {e}")
+        return None
+
+def load_permanent_listedness_pairs() -> Set[Tuple[str, str]]:
+    file_path = find_master_excel_file(LISTEDNESS_MASTER_BASENAME)
+    if not file_path:
+        st.warning("Permanent Listedness_CX Excel not found. Add data/Listedness_CX.xlsx to GitHub.")
+        return set()
+    try:
+        df = read_master_excel(file_path)
+        pairs = to_pair_set(df)
+        st.caption(
+            f"Using permanent listedness master: {file_path.name} "
+            f"({len(pairs)} pairs loaded; updated {datetime.fromtimestamp(file_path.stat().st_mtime).strftime('%d-%b-%Y %H:%M')})"
+        )
+        if not pairs:
+            st.info("Listedness_CX file loaded but produced no valid pairs. Check columns: Drug Name and LLT.")
+        return pairs
+    except Exception as e:
+        st.error(f"Failed to read permanent Listedness_CX Excel ({file_path.name}): {e}")
+        return set()
+
 with tab1:
     st.markdown("### \U0001F50E Upload Files \U0001F5C2\ufe0f")
     if st.button("Clear Inputs", help="Clear uploaded XMLs and parsed data (keep access)."):
@@ -610,36 +703,12 @@ with tab1:
         help="Upload one or more E2B XML files for parsing.",
         key=f"xml_uploader_{ver}"
     )
-    mapping_file = st.file_uploader(
-        "Upload LLT-PT Mapping Excel file",
-        type=["xlsx"],
-        help="Upload the MedDRA LLT-PT mapping Excel file.",
-        key=f"map_uploader_{ver}"
-    )
-    listedness_file = st.file_uploader(
-        "Upload Listedness Excel (columns: Drug Name, LLT)",
-        type=["xlsx"],
-        help="Pair-list for product × LLT listedness.",
-        key=f"listedness_uploader_{ver}"
-    )
+    st.info("MedDRA and Listedness_CX are loaded automatically from the GitHub repository data folder. Upload only XML files here.")
 
     competitor_names: Set[str] = set(DEFAULT_COMPETITOR_NAMES)
 
-    mapping_df = None
-    if mapping_file:
-        mapping_df = pd.read_excel(mapping_file, engine="openpyxl")
-        if "LLT Code" in mapping_df.columns:
-            mapping_df["LLT Code"] = mapping_df["LLT Code"].astype(str).str.strip()
-
-    listedness_pairs: Set[Tuple[str, str]] = set()
-    if listedness_file:
-        try:
-            ldf = pd.read_excel(listedness_file, engine="openpyxl")
-            listedness_pairs = to_pair_set(ldf)
-            if not listedness_pairs:
-                st.info("Listedness file loaded but produced no valid pairs. Check column names and values.")
-        except Exception as e:
-            st.error(f"Failed to read Listedness file: {e}")
+    mapping_df = load_permanent_meddra_mapping()
+    listedness_pairs: Set[Tuple[str, str]] = load_permanent_listedness_pairs()
 
     seriousness_map = {
         "resultsInDeath": "Death",
