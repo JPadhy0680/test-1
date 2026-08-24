@@ -279,7 +279,13 @@ LAUNCH_INFO = {
     "apixaban": ("launched", parse_dd_mmm_yy("26-Feb-25")),
     "apremilast": ("launched", parse_dd_mmm_yy("19-Jan-26")),
     "bexarotene": ("launched", parse_dd_mmm_yy("19-Jan-23")),
-    "brivaracetam": ("awaited", None),
+    "brivaracetam": ("launched_by_strength", {
+        10.0: parse_dd_mmm_yy("21-Aug-26"),
+        25.0: parse_dd_mmm_yy("21-Aug-26"),
+        50.0: parse_dd_mmm_yy("21-Aug-26")
+        75.0: parse_dd_mmm_yy("21-Aug-26"), 
+        100.0: parse_dd_mmm_yy("21-Aug-26"),
+    }),
     "clobazam": ("launched", parse_dd_mmm_yy("26-Sep-24")),
     "clonazepam": ("launched", parse_dd_mmm_yy("20-Jan-25")),
     "clobazam": ("launched_by_strength", {
